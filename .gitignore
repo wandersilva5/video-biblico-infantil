@@ -1,0 +1,5 @@
+node_modules/*
+AGENTS.md
+docs/*
+output/*
+.html-video/*

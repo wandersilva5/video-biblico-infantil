@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Historinhas Bíblicas Infantis</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topo">
+    <div class="topo-inner">
+      <button class="brand" id="btn-inicio" title="Início">
+        <span class="logo">✦</span>
+        <span>Historinhas Bíblicas Infantis</span>
+      </button>
+      <div class="topo-acoes">
+        <button class="btn btn-ghost" id="btn-config" title="Configurações">⚙</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+    <!-- Dashboard -->
+    <section id="tela-dashboard" class="tela ativa">
+      <div class="container">
+        <h1 class="titulo-pagina">Historinhas</h1>
+        <div class="nova-aula">
+          <input id="input-topico" name="topico" type="text" placeholder='Ex.: "A Arca de Noé"' />
+          <button class="btn btn-primario" id="btn-nova-aula">Criar nova historinha</button>
+        </div>
+        <div id="lista-aulas" class="grid-aulas"></div>
+      </div>
+    </section>
+
+    <!-- Workspace da aula -->
+    <section id="tela-aula" class="tela">
+      <div class="workspace">
+        <nav class="stepper" id="stepper"></nav>
+        <div class="conteudo">
+          <div class="caminho">
+            <button class="btn btn-ghost" id="btn-voltar">← Historinhas</button>
+            <h2 id="titulo-aula"></h2>
+            <button class="btn btn-ghost btn-mini" id="btn-atualizar" title="Recarregar roteiro e artefatos">↻ Atualizar</button>
+            <div class="spacer"></div>
+            <div id="dica-proximo" class="dica"></div>
+          </div>
+          <div id="status-job" class="status-job" hidden></div>
+          <div id="etapa-container"></div>
+          <section class="painel-log">
+            <div class="painel-log-topo">
+              <button class="btn btn-ghost" id="btn-toggle-log">▾ Log das etapas</button>
+              <button class="btn btn-ghost btn-mini" id="btn-limpar-log">Limpar</button>
+            </div>
+            <div id="log-linhas" class="log-linhas"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal de configurações -->
+  <div id="modal-config" class="modal" hidden>
+    <div class="modal-janela">
+      <h3>Configurações</h3>
+      <label>LLAMA_URL <input data-cfg="LLAMA_URL" name="cfg-LLAMA_URL" type="text" /></label>
+      <label>COMFY_URL <input data-cfg="COMFY_URL" name="cfg-COMFY_URL" type="text" /></label>
+      <label>COMFY_OUTPUT_DIR <input data-cfg="COMFY_OUTPUT_DIR" name="cfg-COMFY_OUTPUT_DIR" type="text" /></label>
+      <label>ZIMAGE_UNET <input data-cfg="ZIMAGE_UNET" name="cfg-ZIMAGE_UNET" type="text" /></label>
+      <label>ZIMAGE_CLIP <input data-cfg="ZIMAGE_CLIP" name="cfg-ZIMAGE_CLIP" type="text" /></label>
+      <label>ZIMAGE_VAE <input data-cfg="ZIMAGE_VAE" name="cfg-ZIMAGE_VAE" type="text" /></label>
+      <label>ZIMAGE_LORA <input data-cfg="ZIMAGE_LORA" name="cfg-ZIMAGE_LORA" type="text" /></label>
+      <label>Motor de TTS
+        <select data-cfg="TTS" name="cfg-TTS">
+          <option value="edge-tts">edge-tts</option>
+          <option value="qwen">qwen (clone da Bia)</option>
+        </select>
+      </label>
+      <label>VOZ (edge-tts) <input data-cfg="VOZ" name="cfg-VOZ" type="text" /></label>
+      <label>FORMATO (16:9 ou 9:16)
+        <select data-cfg="FORMATO" name="cfg-FORMATO">
+          <option value="16:9">16:9 (YouTube)</option>
+          <option value="9:16">9:16 (Reels/TikTok/Shorts)</option>
+        </select>
+      </label>
+      <label>PORTA <input data-cfg="PORTA" name="cfg-PORTA" type="number" /></label>
+      <div class="modal-acoes">
+        <button class="btn btn-ghost" id="btn-fechar-config">Fechar</button>
+        <button class="btn btn-primario" id="btn-salvar-config">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Modal de visualização fullscreen de slides -->
+  <div id="modal-slide" class="modal modal-slide" hidden>
+    <button class="slide-fechar" id="slide-fechar" title="Fechar (Esc)">✕</button>
+    <button class="slide-nav nav-anterior" id="slide-anterior" title="Anterior (←)">‹</button>
+    <figure class="modal-slide-fig">
+      <img id="modal-slide-img" src="" alt="" />
+      <figcaption>
+        <span id="modal-slide-contador" class="slide-contador"></span>
+        <span id="modal-slide-titulo" class="slide-titulo"></span>
+      </figcaption>
+    </figure>
+    <button class="slide-nav nav-proximo" id="slide-proximo" title="Próximo (→)">›</button>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>
