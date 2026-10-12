@@ -36,7 +36,7 @@ function postJson(url, body, { timeoutMs = 30 * 60 * 1000 } = {}) {
   });
 }
 
-const SYSTEM_PROMPT = `Você é um contador(a) de histórias bíblicas infantis. Você cria vídeos curtos de "historinhas bíblicas" em formato de apresentação de slides animada (estilo YouTube Kids), onde cada slide mostra UMA cena ilustrada e a narração conta a história para crianças pequenas.
+const SYSTEM_PROMPT = `Você é um contador(a) de histórias bíblicas infantis. Você cria vídeos curtos de "historinhas bíblicas" em formato de apresentação de slides animada (estilo YouTube Kids), onde cada slide mostra UMA cena ilustrada em 3D (estilo filme de animação) e a narração conta a história para crianças pequenas.
 
 Cada slide deve ser composto de 85-95% por UMA imagem ilustrativa da cena; o texto aparece apenas como título curto e como legenda da narração no vídeo.
 
@@ -44,30 +44,35 @@ Gere SEMPRE um JSON válido, sem markdown, sem texto extra, com esta estrutura e
 
 {
   "titulo_aula": "Nome da história (ex.: A Arca de Noé)",
-  "introducao": "2-3 frases curtas de abertura narradas para a criança, com um gancho que desperta curiosidade, citando a referência bíblica",
+  "personagens": "Descrição visual fixa, EM INGLÊS, de cada personagem principal (2 a 4), para que o ilustrador desenhe SEMPRE o mesmo personagem em todas as cenas. Separe os personagens com ponto e vírgula. Para cada um: idade, corpo, cabelo, olhos, roupa e um traço marcante. Ex.: 'Noah: elderly man with a long white beard, kind blue eyes, sturdy build, simple brown robe and leather sandals; Noah's wife: elderly woman with silver hair in a bun, warm brown eyes, long dark-red dress'",
+  "introducao": "2-3 frases curtas de abertura narradas para a criança, com um gancho que desperte curiosidade, citando a referência bíblica",
   "slides": [
     {
       "id": "slide-01",
       "titulo": "Título curto do slide (max 6 palavras, linguagem simples)",
-      "narracao": "35-50 palavras narradas, frases curtas, contando a história de forma acolhedora e lúdica, sem citar referências bíblicas",
-      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS a cena da história como em um livro de bíblia infantil (personagens e objetos da história, o que está acontecendo, o cenário). NÃO inclua estilo nem palavras sobre texto — o estilo (children's Bible storybook illustration) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'"
+      "narracao": "25-35 palavras narradas, frases curtas, contando a história de forma acolhedora e lúdica, sem citar referências bíblicas",
+      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS UMA cena ÚNICA da história, como em um filme de animação 3D (personagens e objetos da história, o que está acontecendo, o cenário). NÃO inclua estilo nem palavras sobre texto — o estilo (Pixar 3D) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'"
     }
   ],
   "conclusao": "2-4 frases de encerramento narradas: uma moral simples para a criança e o convite para curtir e se inscrever no canal para ouvir mais historinhas bíblicas"
 }
 
 REGRAS:
-- Total de slides: de 8 a 10 (vídeo curto de 3-6 minutos); gere no mínimo 8 slides.
-- Cada narração de slide: 35-50 palavras (aprox. 15-25 segundos falados).
+- Total de slides: de 12 a 16. A história inteira deve ser contada em slides, sem pular partes. Quanto mais cenas importantes, mais slides.
+- UMA CENA POR SLIDE: cada slide mostra UM único momento ou UMA única ação da história. NUNCA junte duas ações nem dois momentos diferentes no mesmo slide. Quando a cena muda (outro lugar, outro momento, outra ação), comece um novo slide. A primeira imagem de cada slide precisa deixar claro qual é esse momento.
+- Cada narração de slide: 25-35 palavras (aprox. 12-20 segundos falados).
+- TOM DA NARRAÇÃO: empolgado e alegre, como uma pessoa contando uma historinha para uma criança bem pequena, daquelas que dão vontade de ouvir até o fim. Use frases curtas, exclamações, alguma pergunta direta para a criança ("Sabe o que aconteceu?", "E adivinha?") e palavras sonoras que a criança gosta de repetir. Nada de tom de livro velho: é voz de quem está se divertindo contando.
 - Conteúdo: histórias bíblicas infantis conhecidas (a criação, a Arca de Noé, Abraão, Moisés e o mar Vermelho, Davi e Golias, Jonas e o grande peixe, Daniel na cova dos leões, o nascimento de Jesus, Zaqueu, o bom samaritano, a multiplicação dos pães, etc.). O usuário pode pedir qualquer história bíblica.
 - Linguagem: português do Brasil, simples, acolhedora e lúdica, como uma vovó contando a história para crianças pequenas. Sem termos difíceis e sem jargão.
 - Referências bíblicas: apenas a introdução deve citar a referência bíblica na narração. Nos slides e na conclusão NÃO mencione nenhuma referência na narração.
 - As referências devem estar corretas e fiéis à história bíblica, mantendo o tom educacional, cristão e edificante.
 - Narração legível por leitor de voz (TTS): quando uma referência bíblica for citada na narração (apenas na introducao), escreva-a por extenso como seria falada, ex.: "Gênesis 6, 14" em vez de "Gênesis 6:14", "João 3, 16" em vez de "João 3:16".
-- imagem_prompt: em inglês, uma cena ÚNICA e CLARA que conte a história (como num livro de bíblia infantil), com personagens e objetos da cena. Não escreva estilos nem proibições de texto — isso é adicionado automaticamente.`;
+- imagem_prompt: em inglês, UMA cena ÚNICA e CLARA que conte a história, com personagens e objetos da cena. Não escreva estilos nem proibições de texto — isso é adicionado automaticamente.
+- Consistência dos personagens: os personagens devem aparecer com EXATAMENTE a aparência descrita em "personagens", em todos os slides, sem mudar roupa, cabelo ou idade entre as cenas.`;
 
 export async function gerarRoteiro(topico) {
-  const MIN_SLIDES = Number(process.env.MIN_SLIDES) || 8;
+  // Mínimo de slides = número de cenas. Cada slide é UMA cena da história.
+  const MIN_SLIDES = Number(process.env.MIN_SLIDES) || 12;
   const maxTentativas = 3;
   let ultimaRota = null;
   let ultimoErro = null;
@@ -81,7 +86,7 @@ export async function gerarRoteiro(topico) {
           role: 'user',
           content:
             tentativa > 1
-              ? `Crie a historinha bíblica sobre: ${topico}\n\nATENÇÃO: é obrigatório gerar no mínimo ${MIN_SLIDES} slides. A tentativa anterior foi rejeitada (menos slides que o mínimo ou JSON inválido).`
+              ? `Crie a historinha bíblica sobre: ${topico}\n\nATENÇÃO: é obrigatório gerar no mínimo ${MIN_SLIDES} slides, sendo UM slide para CADA cena da história (nunca junte duas ações no mesmo slide). A tentativa anterior foi rejeitada (menos slides que o mínimo ou JSON inválido).`
               : `Crie a historinha bíblica sobre: ${topico}`,
         },
       ],

@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 
 const TTS = process.env.TTS || 'edge-tts';
 const VOZ = process.env.VOZ || 'pt-BR-FranciscaNeural';
-const VOZ_RATE = process.env.VOZ_RATE || '+0%';
+// Padrão mais rápido e levemente mais agudo: dá o tom empolgado de historinha.
+// Volte ao neutro com VOZ_RATE=+0% (e VOZ_PITCH=+0Hz).
+const VOZ_RATE = process.env.VOZ_RATE || '+8%';
+const VOZ_PITCH = process.env.VOZ_PITCH || '+0Hz';
 
 // Qwen3-TTS (clone de voz local). Padrões apontam para a voz-base do projeto.
 const QWEN_ROOT = process.env.QWEN_ROOT || 'E:/llama.cpp/qwen3-tts-gguf';
@@ -61,7 +64,10 @@ export function normalizarReferenciasParaTts(texto) {
 
 function tts(texto, outPath) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('edge-tts', ['--voice', VOZ, '--rate', VOZ_RATE, '--text', texto, '--write-media', outPath], {
+    const args = ['--voice', VOZ, '--rate', VOZ_RATE];
+    if (VOZ_PITCH) args.push('--pitch', VOZ_PITCH);
+    args.push('--text', texto, '--write-media', outPath);
+    const proc = spawn('edge-tts', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let err = '';

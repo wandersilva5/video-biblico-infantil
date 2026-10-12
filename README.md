@@ -23,9 +23,9 @@ Produz **16:9 (YouTube)** ou **9:16 (Reels/Shorts/TikTok)**, sempre **um formato
 
 Quatro etapas encadeadas, cada uma consumindo o resultado da anterior:
 
-1. **`gerar_roteiro.mjs`** — chama o **llama-server** (OpenAI-compatible) com um prompt de **contador(a) de histórias bíblicas infantis** e gera o `roteiro.json` (título, introdução com a referência bíblica, 8–10 slides com título/narração curta/prompt de imagem, conclusão).
-2. **`gerar_imagens.mjs`** — monta para cada slide um prompt que **conta a cena da história** em estilo de bíblia infantil (via `buildPromptImagem`, a partir do `imagem_prompt` do roteiro), envia ao **ComfyUI** (workflow Z-Image Turbo com difusão em resolução base menor + upscale) e salva `slide-NN.png`. Também gera as artes `00-intro.png` (mulher com a Bíblia infantil) e `outro.png` (encerramento infantil). **Sem texto** nas imagens (sufixo anti-texto + prompt negativo). Falhas são **retentadas** automaticamente e não abortam as demais. Proporção definida pelo `FORMATO`.
-3. **`gerar_narracao.mjs`** — usa o CLI **edge-tts** para gerar os MP3s de narração com **voz feminina pt-BR** (`pt-BR-FranciscaNeural`). **Reutiliza o MP3** quando o texto não mudou (hash no `manifesto.json`).
+1. **`gerar_roteiro.mjs`** — chama o **llama-server** (OpenAI-compatible) com um prompt de **contador(a) de histórias bíblicas infantis** e gera o `roteiro.json` (título, introdução com a referência bíblica, **`personagens`** (descrição visual fixa, em inglês, dos personagens), 12–16 slides com título/narração curta/prompt de imagem, conclusão). A regra é **uma cena por slide**: cada slide mostra um único momento da ação, sem juntar duas cenas.
+2. **`gerar_imagens.mjs`** — monta para cada slide um prompt que **conta a cena da história** em estilo **Pixar 3D** (via `buildPromptImagem`, a partir do `imagem_prompt` + da âncora de personagens do roteiro), envia ao **ComfyUI** (workflow Qwen-image 2.1 com difusão em resolução base menor + upscale) e salva `slide-NN.png`. Também gera as artes `00-intro.png` (mulher com a Bíblia infantil) e `outro.png` (encerramento infantil). **Sem texto** nas imagens (sufixo anti-texto + prompt negativo). Falhas são **retentadas** automaticamente e não abortam as demais. Proporção definida pelo `FORMATO`.
+3. **`gerar_narracao.mjs`** — usa o CLI **edge-tts** para gerar os MP3s de narração com **voz feminina pt-BR** (`pt-BR-FranciscaNeural`), em ritmo levemente acelerado (`VOZ_RATE=+8%`) para o tom de historinha. **Reutiliza o MP3** quando o texto não mudou (hash no `manifesto.json`).
 4. **`montar_video.mjs`** — consome o `roteiro.json` + PNGs + MP3s e renderiza o MP4 final via **html-video** (Chromium headless + ffmpeg), com frames animados, **legenda em destaque** (texto da narração em faixa com contorno e fade), marca "Histórias Bíblicas Infantis" e áudio mixado (com **trilha sonora opcional** via `TRILHA`).
 
 Cada etapa imprime seu resultado JSON no stdout; linhas de progresso/log vão para o stderr.
@@ -41,22 +41,26 @@ O pipeline depende de quatro serviços, todos locais e específicos da máquina:
 | **edge-tts** (CLI no PATH) | — | Narração em MP3, voz `pt-BR-FranciscaNeural` (env `VOZ`) |
 | **ffmpeg / ffprobe** (no PATH) | — | Usados pelo `montar_video.mjs` |
 
-### Workflow Z-Image Turbo (ComfyUI)
+### Workflow Qwen-image 2.1 (ComfyUI)
 
-As imagens usam o workflow **Z-Image Turbo**:
+As imagens usam o workflow **Qwen-image 2.1** (GGUF), replicado do template t2i do ComfyUI:
 
-- `UnetLoaderGGUFAdvanced` com `z-image\z_image_turbo-Q4_K_M.gguf` (com `patch_on_device: true`)
-- `CLIPLoader` tipo `lumina2` com `qwen\qwen3_4b_fp8_scaled.safetensors`
-- LoRA `z-image\z-image-anime-01.safetensors` (strength 0.8; `ZIMAGE_LORA_STRENGTH=0` desliga o LoRA)
-- `ModelSamplingAuraFlow` (shift 7)
-- VAE `FLUX-Anime-VAE-B2.safetensors`
-- `KSampler`: 9 passos (`ZIMAGE_STEPS`), cfg 1.0, euler/normal
+- `UnetLoaderGGUF` com `qwen\qwen-image-2.1-Q5_K_M.gguf`
+- `CLIPLoader` tipo `qwen_image` com `qwen3vl_8b_int8_convrot.safetensors`
+- `LoraLoader` com `qwen\p_qwen_image_2.1_8step_v0.1.safetensors` (strength 1.0; `ZIMAGE_LORA_STRENGTH=0` desliga o LoRA)
+- `TextEncodeQwenImage21` (prompt + negativo + resolução num único node)
+- VAE `qwen_image_2.1_vae_bf16.safetensors`
+- `KSampler`: 8 passos (`ZIMAGE_STEPS`), cfg 1.0, euler/simple
 
-**Difusão em 2 passos (perf):** a difusão roda na **metade** da resolução final (~576x320 em 16:9, ~320x576 em 9:16) e um nó `ImageScale` (`lanczos`) faz o upscale para a final dentro do próprio workflow. Junto com `patch_on_device: true`, reduz muito o tempo por imagem. Desligue o upscale com `ZIMAGE_UPSCALE=0`.
+**Difusão em 2 passos (perf):** a difusão roda numa fração da resolução final (`ZIMAGE_ESCALA_BASE`, default 0.5 → ~576x320 em 16:9) e um nó `ImageScale` (`lanczos`) faz o upscale para a final dentro do próprio workflow. O Qwen-image 2.1 aguenta resolução nativa e 1152x640/640x1152 já são múltiplos de 32 — para mais detalhe, use `ZIMAGE_ESCALA_BASE=1` (ou `ZIMAGE_UPSCALE=0`) e aceite o tempo maior.
+
+**VRAM (RTX 3060 Ti, 8GB):** o UNET (5.1GB) e o text encoder oficial (~8.9GB) **não cabem juntos na GPU** — carregar os dois derruba o ComfyUI. Por isso o `CLIPLoader` roda na **CPU** por padrão (`QWEN_CLIP_DEVICE=cpu`); use `default` (GPU) apenas com VRAM de sobra.
 
 O diretório de saída do ComfyUI é fixo em `D:\ComfyUI_windows_portable\ComfyUI\output` (env `COMFY_OUTPUT_DIR`). Cada imagem é tentada até `ZIMAGE_TENTATIVAS` vezes (default 3); antes de cada nova tentativa o pipeline manda `POST /interrupt` no ComfyUI.
 
-> **Gotcha conhecido**: o custom node `ComfyUI-GGUF-FantasyTalking` sobrescreve `UnetLoaderGGUF` e `CLIPLoaderGGUF` com retornos quebrados (tipo `WANVIDEOMODEL` e lista de arquiteturas antiga). Por isso o pipeline usa `UnetLoaderGGUFAdvanced` + `CLIPLoader` (safetensors), que não são afetados.
+### Personagens consistentes
+
+O `personagens` do `roteiro.json` descreve, **em inglês e uma única vez**, a aparência de cada personagem (idade, corpo, cabelo, olhos, roupa, traço marcante). `buildPromptImagem(slide, roteiro)` repete essa descrição no início de **todos** os prompts, seguida da âncora `identical characters, same faces, same hairstyles, same outfits, same character designs in every scene`. A **seed também é a mesma em todas as cenas** (`SEED_BASE`) — `SEED_POR_SLIDE=1` volta a variar por slide.
 
 ## Início rápido
 
@@ -156,11 +160,13 @@ Modelo de dados compartilhado — escrito pelo `gerar_roteiro.mjs` e consumido p
 
 ```
 titulo_aula, introducao, conclusao    (strings de narração)
+personagens                           (descrição visual fixa em inglês,
+                                      repetida em todos os prompts de imagem)
 slides[]: {
   id,                                (ex.: "slide-01")
   titulo,                            (≤ 6 palavras, linguagem simples)
-  narracao,                          (35–50 palavras)
-  imagem_prompt                      (descrição da CENA em inglês, estilo bíblia infantil)
+  narracao,                          (25–35 palavras, tom empolgado)
+  imagem_prompt                      (descrição de UMA CENA em inglês)
 }
 slug, topico                         (adicionados pelo script)
 ```
@@ -209,23 +215,27 @@ npx playwright-core install chromium   # a partir de node_modules/playwright-cor
 | `LLAMA_URL` | URL do llama-server | `http://127.0.0.1:8091` |
 | `COMFY_URL` | URL do ComfyUI | `http://127.0.0.1:8188` |
 | `COMFY_OUTPUT_DIR` | Saída de imagens do ComfyUI | `D:\ComfyUI_windows_portable\ComfyUI\output` |
-| `COMFY_TIMEOUT` | Aguardo por imagem no ComfyUI (ms) | `600000` (10 min) |
-| `ZIMAGE_UNET` | GGUF do UNet Z-Image Turbo | `z-image\z_image_turbo-Q4_K_M.gguf` |
-| `ZIMAGE_CLIP` | CLIP do Z-Image | `qwen\qwen3_4b_fp8_scaled.safetensors` |
-| `ZIMAGE_VAE` | VAE | `FLUX-Anime-VAE-B2.safetensors` |
-| `ZIMAGE_LORA` | LoRA de estilo | `z-image\z-image-anime-01.safetensors` |
-| `ZIMAGE_STEPS` | Passos do KSampler (benchmark) | `9` |
-| `ZIMAGE_LORA_STRENGTH` | Força do LoRA (`0` desliga) | `0.8` |
+| `COMFY_TIMEOUT` | Aguardo por imagem no ComfyUI (ms) | `900000` (15 min) |
+| `ZIMAGE_UNET` | GGUF do UNet Qwen-image 2.1 | `qwen\qwen-image-2.1-Q5_K_M.gguf` |
+| `ZIMAGE_CLIP` | Text encoder do Qwen-image 2.1 | `qwen3vl_8b_int8_convrot.safetensors` |
+| `QWEN_CLIP_DEVICE` | Onde carregar o text encoder: `cpu` (RAM) ou `default` (GPU) | `cpu` |
+| `ZIMAGE_VAE` | VAE | `qwen_image_2.1_vae_bf16.safetensors` |
+| `ZIMAGE_LORA` | LoRA de velocidade (8 passos) | `qwen\p_qwen_image_2.1_8step_v0.1.safetensors` |
+| `ZIMAGE_STEPS` | Passos do KSampler (benchmark) | `8` |
+| `ZIMAGE_LORA_STRENGTH` | Força do LoRA (`0` desliga) | `1.0` |
+| `ZIMAGE_ESCALA_BASE` | Fração da resolução final usada na difusão (`0.25`–`1`) | `0.5` |
 | `ZIMAGE_UPSCALE` | `0` desliga o upscale (difusão na resolução final) | `1` |
+| `SEED_POR_SLIDE` | `1` volta a usar uma seed por slide (default: seed única) | — |
 | `ZIMAGE_TENTATIVAS` | Tentativas por imagem antes de falhar | `3` |
 | `FORMATO` | Formato do vídeo/imagens: `16:9` ou `9:16` | `16:9` |
 | `IMAGEM_LARGURA` / `IMAGEM_ALTURA` | Proporção das imagens (sobrepõe `FORMATO`) | derivada do `FORMATO` (`1152x640` / `640x1152`) |
-| `ESTILO_SUFIXO` | Sufixo de estilo apensado ao prompt da cena | children's Bible storybook illustration… |
-| `PROMPT_INTRO` | Prompt da arte de abertura (`00-intro.png`) | mulher com a Bíblia infantil |
-| `PROMPT_OUTRO` | Prompt da arte de encerramento (`outro.png`) | criança com a Bíblia infantil |
-| `MIN_SLIDES` | Mínimo de slides no roteiro | `8` |
+| `ESTILO_SUFIXO` | Sufixo de estilo apensado ao prompt da cena | Pixar 3D… |
+| `PROMPT_INTRO` | Prompt da arte de abertura (`00-intro.png`) | contadora 3D com a Bíblia infantil |
+| `PROMPT_OUTRO` | Prompt da arte de encerramento (`outro.png`) | criança 3D abraçando a Bíblia |
+| `MIN_SLIDES` | Mínimo de slides (cenas) no roteiro | `12` |
 | `VOZ` | Voz do edge-tts (feminina pt-BR) | `pt-BR-FranciscaNeural` |
-| `VOZ_RATE` | Ritmo de leitura do edge-tts | `+0%` |
+| `VOZ_RATE` | Ritmo de leitura do edge-tts | `+8%` |
+| `VOZ_PITCH` | Tom da voz do edge-tts | `+0Hz` |
 | `MARCA` | Marca exibida na intro/rodapé/outro | `Histórias Bíblicas Infantis` |
 | `LEGENDA` | `0` mostra só o título do slide em vez da legenda | `1` |
 | `LEGENDA_FADE` | `0` desliga o fade-in/out da legenda | `1` |
@@ -244,7 +254,10 @@ npx playwright-core install chromium   # a partir de node_modules/playwright-cor
 ## Pontos de atenção (gotchas)
 
 - Não renomeie `.mjs` nem adicione `"type": "module"` — os scripts são ESM puros rodados direto. Os três `gerar_*.mjs` guardam `main()` para permitir import, mas `montar_video.mjs` roda `main()` incondicionalmente (importá-lo o executaria).
-- Conteúdo em pt-BR; prompts para o LLM em português; `imagem_prompt` em inglês. As imagens **contam a cena da história** (personagens e objetos da narrativa) em estilo bíblia infantil, sempre **sem texto** (o sufixo `no text, no letters, no words, no captions, no speech bubbles` é apensado automaticamente e o prompt negativo veta texto).
+- Conteúdo em pt-BR; prompts para o LLM em português; `imagem_prompt` em inglês. As imagens **contam a cena da história** (personagens e objetos da narrativa) em estilo **Pixar 3D**, sempre **sem texto** (o sufixo `no text, no letters, no words, no captions, no speech bubbles` é apensado automaticamente e o prompt negativo veta texto).
+- **Uma cena por slide**: o roteiro é instruído a gerar 12–16 slides, um por momento da ação. Se a história precisar de mais cenas, suba `MIN_SLIDES`.
+- **Qwen-image 2.1 em 8GB de VRAM**: o text encoder (~8.9GB) não cabe na GPU junto com o UNET (5.1GB) — o ComfyUI morre com OOM. O padrão é `QWEN_CLIP_DEVICE=cpu`.
+- O `TextEncodeQwenImage21` exige o input autogrow `images` no schema do node, mas o template t2i oficial do ComfyUI trabalha sem imagens de referência — a validação do comfy-cli é mais estrita que o servidor e acusa erro. O pipeline submete por HTTP direto (`POST /prompt`), como o próprio ComfyUI.
 - `FORMATO` controla imagens **e** vídeo; gere **um formato por vez**, nunca os dois.
 - O servidor web reutiliza os scripts via spawn; `montar_video.mjs` **sempre** via spawn.
 - A porta `5173` pode colidir com outros projetos escutando em `::1` (IPv6). Se o navegador abrir o servidor errado, use outra porta (neste repo: `5174`) ou `http://127.0.0.1:<porta>/`.

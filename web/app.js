@@ -1,19 +1,12 @@
 const $ = (sel) => document.querySelector(sel);
 
-const ETAPAS = [
-  { n: 1, rotulo: 'Roteiro' },
-  { n: 2, rotulo: 'Imagens' },
-  { n: 3, rotulo: 'Narração' },
-  { n: 4, rotulo: 'Vídeo' },
-];
-
 const estado = {
   tela: 'dashboard',
   slug: null,
   roteiro: null,
   artefatos: null,
+  unificado: [],        // intro + slides + conclusao (texto + imagem + audio)
   config: null,
-  etapa: 1,
   jobAtivo: false,
   job: null,
   cancelado: false,
@@ -83,12 +76,10 @@ function mostrarTela(nome) {
 
 async function abrirAula(slug) {
   estado.slug = slug;
-  estado.etapa = 1;
   await Promise.all([carregarRoteiro(), carregarArtefatos()]);
   $('#titulo-aula').textContent = estado.roteiro.titulo_aula;
   mostrarTela('aula');
-  renderStepper();
-  mudarEtapa(1);
+  renderTelaUnica();
 }
 
 async function carregarRoteiro() {
@@ -97,338 +88,204 @@ async function carregarRoteiro() {
 
 async function carregarArtefatos() {
   estado.artefatos = await api(`/api/artefatos/${estado.slug}`);
-  renderStepper();
 }
 
 // ---------------------------------------------------------------------------
-// Stepper + dica
+// Unificação: roteiro + imagens + áudios em um só array
 // ---------------------------------------------------------------------------
-function statusEtapa(n) {
-  const st = estado.artefatos;
-  if (!st) return 'erro';
-  if (n === 1) return 'ok';
-  if (n === 2) return st.imagensCompletas ? 'ok' : st.slides.some((s) => s.imagem.existe) ? 'alerta' : 'erro';
-  if (n === 3) return st.audioCompleto ? 'ok' : 'alerta';
-  return st.video.existe ? 'ok' : 'erro';
-}
-
-function renderStepper() {
-  const el = $('#stepper');
-  el.innerHTML = '';
-  const st = estado.artefatos;
-  for (const e of ETAPAS) {
-    const s = statusEtapa(e.n);
-    const btn = document.createElement('button');
-    btn.className = `passo ${estado.etapa === e.n ? 'ativo' : ''}`;
-    const icone = s === 'ok' ? '✓' : s === 'alerta' ? '!' : '○';
-    btn.innerHTML = `<span class="num">${e.n}</span><span class="rotulo">${e.rotulo}</span><span class="status-dot ${s}">${icone}</span>`;
-    btn.onclick = () => mudarEtapa(e.n);
-    el.appendChild(btn);
-  }
-  // dica do próximo passo
-  const dica = $('#dica-proximo');
-  if (!st) { dica.textContent = ''; return; }
-  if (!st.imagensCompletas) dica.textContent = 'Próximo: gerar imagens dos slides';
-  else if (!st.audioCompleto) dica.textContent = 'Próximo: gerar narrações';
-  else if (!st.video.existe) dica.textContent = 'Próximo: montar o vídeo';
-  else dica.textContent = 'Tudo pronto — revise ou ajuste à vontade';
-}
-
-function mudarEtapa(n) {
-  estado.etapa = n;
-  renderStepper();
-  const container = $('#etapa-container');
-  if (n === 1) renderEtapa1(container);
-  else if (n === 2) renderEtapa2(container);
-  else if (n === 3) renderEtapa3(container);
-  else renderEtapa4(container);
-  sincronizarBotoes();
-  renderStatusJob();
-}
-
-let _jobClearT = null;
-
-function formatarMin(s) {
-  if (!s || s <= 0) return '';
-  return s >= 60 ? `~${Math.round(s / 60)} min` : `~${Math.max(1, s)} s`;
-}
-
-function renderStatusJob() {
-  const el = $('#status-job');
-  const job = estado.job;
-  if (!job) {
-    el.hidden = true;
-    return;
-  }
-  el.hidden = false;
-  el.className = `status-job ${job.status}`;
-  const rotulo = NOME_ETAPA[job.etapa] || job.etapa;
-  const icone =
-    job.status === 'ok' ? '✓' :
-    job.status === 'erro' ? '✕' : '🔍';
-  const statusTexto = job.status === 'ok' ? `${rotulo} concluída com sucesso` :
-    job.status === 'erro' ? (job.cancelado ? `${rotulo} cancelado` : `${rotulo} falhou`) : `${rotulo} em andamento`;
-  el.innerHTML = `
-    <span class="status-icone">${icone}</span>
-    <div class="status-texto">
-      <strong>${statusTexto}</strong>
-      <span>${esc(job.msg || '')}</span>
-      ${job.eta != null ? `<span class="msg-eta">restante ${formatarMin(job.eta)}</span>` : ''}
-      ${job.pct != null ? `<div class="barra-progresso status-barra"><div style="width:${Math.max(0, Math.min(100, job.pct))}%"></div></div>` : ''}
-    </div>
-    ${job.status === 'rodando' ? '<button class="btn btn-mini btn-perigo" id="btn-cancelar-job" title="Encerrar o job atual">⏹ Cancelar</button>' : ''}`;
-  const b = $('#btn-cancelar-job');
-  if (b) b.onclick = cancelarJob;
-}
-
-function sincronizarBotoes() {
-  document.querySelectorAll('#etapa-container .btn').forEach((b) => (b.disabled = estado.jobAtivo));
-}
-
-// ---------------------------------------------------------------------------
-// Etapa 1 — Roteiro
-// ---------------------------------------------------------------------------
-function renderEtapa1(el) {
+function unificar() {
   const r = estado.roteiro;
-  const cards = r.slides
-    .map(
-      (s, i) => `
-    <div class="slide-card" draggable="true" data-dragidx="${i}">
-      <div class="cabeca">
-        <span class="alça" title="Arrastar para reordenar">⠿</span>
-        <span class="num-slide">SLIDE ${String(i + 1).padStart(2, '0')}</span>
-        <input name="slide-${i}-titulo" aria-label="Título do slide ${i + 1}" data-slide="${i}" data-field="titulo" value="${esc(s.titulo)}" placeholder="Título (máx 8 palavras)" />
-        <button class="lixeira" data-action="del-slide" data-slide="${i}" title="Remover slide">✕</button>
-      </div>
-      <div class="campo-texto" style="margin-top:12px">
-        <label>Narração <span class="contador" data-contador="${i}"></span></label>
-        <textarea name="slide-${i}-narracao" aria-label="Narração do slide ${i + 1}" data-slide="${i}" data-field="narracao">${esc(s.narracao)}</textarea>
-      </div>
-      <div class="campo-texto">
-        <label>Prompt da imagem (EN) <span class="msg-progresso">— não é mais usado: as imagens agora são cenas genéricas e tranquilas</span></label>
-        <input name="slide-${i}-prompt" aria-label="Prompt da imagem do slide ${i + 1}" data-slide="${i}" data-field="imagem_prompt" value="${esc(s.imagem_prompt)}" />
-      </div>
-    </div>`,
-    )
-    .join('');
-
-  el.innerHTML = `
-    <div class="etapa-topo">
-      <h3>Roteiro</h3>
-      <div class="etapa-acoes">
-        <button class="btn btn-perigo" data-action="regenerar-roteiro">↺ Regenerar roteiro</button>
-        <button class="btn btn-primario" data-action="salvar-roteiro">💾 Salvar alterações</button>
-      </div>
-    </div>
-    <div class="cartao campo-texto">
-      <label>Introdução (narrada)</label>
-      <textarea name="introducao" aria-label="Introdução" data-field="introducao" rows="3">${esc(r.introducao)}</textarea>
-    </div>
-    <div class="cartao campo-texto">
-      <label>Conclusão (narrada)</label>
-      <textarea name="conclusao" aria-label="Conclusão" data-field="conclusao" rows="3">${esc(r.conclusao)}</textarea>
-    </div>
-    <div class="etapa-topo" style="margin-bottom:10px">
-      <h3 style="font-size:16px">Slides</h3>
-      <button class="btn" data-action="add-slide">+ novo slide</button>
-    </div>
-    <div id="lista-slides">${cards}</div>`;
-
-  atualizarContadores();
-  el.querySelectorAll('.slide-card').forEach((card) => {
-    card.addEventListener('dragstart', () => card.classList.add('dragging'));
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-    card.addEventListener('dragover', (ev) => ev.preventDefault());
-    card.addEventListener('drop', (ev) => {
-      ev.preventDefault();
-      const from = Number(card.dataset.dragidx);
-      const to = Number(el.querySelector('.slide-card.dragging')?.dataset.dragidx ?? from);
-      if (from !== to) {
-        const [item] = estado.roteiro.slides.splice(from, 1);
-        estado.roteiro.slides.splice(to, 0, item);
-        renumerarSlides();
-        renderEtapa1(el);
-      }
+  const st = estado.artefatos;
+  const lista = [];
+  // aberttura
+  lista.push({
+    id: 'intro', tipo: 'abertura', rotulo: 'Abertura',
+    titulo: r.titulo_aula,
+    texto: r.introducao,
+    prefix: '00-intro',
+    imagem: null,
+    audio: st.intro,
+  });
+  // slides (o texto da narração vem do roteiro, não dos artefatos)
+  st.slides.forEach((s) => {
+    const rs = r.slides.find((x) => x.id === s.id) || {};
+    lista.push({
+      id: s.id, tipo: 'slide', rotulo: `Slide ${String(s.idx).padStart(2, '0')}`,
+      idx: s.idx,
+      titulo: s.titulo,
+      texto: rs.narracao || '',
+      prefix: String(s.idx).padStart(2, '0'),
+      imagem: s.imagem.existe
+        ? { existe: true, desatualizado: !!s.imagem.desatualizado, src: s.imagem }
+        : { existe: false, desatualizado: false, src: null },
+      audio: s.audio,
     });
   });
-}
-
-function renumerarSlides() {
-  estado.roteiro.slides.forEach((s, i) => {
-    s.id = `slide-${String(i + 1).padStart(2, '0')}`;
+  // conclusao
+  const totalSlides = st.slides.length;
+  const prefixConclusao = totalSlides ? `${String(totalSlides + 1).padStart(2, '0')}-conclusao` : '01-conclusao';
+  lista.push({
+    id: 'conclusao', tipo: 'conclusao', rotulo: 'Conclusão',
+    titulo: '',
+    texto: r.conclusao,
+    prefix: prefixConclusao,
+    imagem: null,
+    audio: st.conclusao,
   });
-  // Atualizar manifesto será feito no salvamento (PUT /api/roteiro)
-}
-
-function lerRoteiroDoDOM() {
-  const r = estado.roteiro;
-  r.introducao = $('[data-field="introducao"]')?.value ?? r.introducao;
-  r.conclusao = $('[data-field="conclusao"]')?.value ?? r.conclusao;
-  r.slides.forEach((s, i) => {
-    s.titulo = $(`[data-slide="${i}"][data-field="titulo"]`)?.value ?? s.titulo;
-    s.narracao = $(`[data-slide="${i}"][data-field="narracao"]`)?.value ?? s.narracao;
-    s.imagem_prompt = $(`[data-slide="${i}"][data-field="imagem_prompt"]`)?.value ?? s.imagem_prompt;
-  });
-}
-
-function contarPalavras(texto) {
-  return (texto.trim().match(/\S+/g) || []).length;
-}
-
-function atualizarContadores() {
-  estado.roteiro.slides.forEach((s, i) => {
-    const badge = $(`[data-contador="${i}"]`);
-    if (!badge) return;
-    const n = contarPalavras(s.narracao);
-    badge.textContent = `${n} palavras`;
-    badge.className = `contador ${n >= 35 && n <= 55 ? 'dentro' : 'fora'}`;
-  });
+  return lista;
 }
 
 // ---------------------------------------------------------------------------
-// Etapa 2 — Imagens
+// Renderização em tela única
 // ---------------------------------------------------------------------------
-function renderEtapa2(el) {
-  const st = estado.artefatos;
-  const cards = st.slides
-    .map((s) => {
-      const img = s.imagem.existe
-        ? `<img src="/media/${estado.slug}/slide-${String(s.idx).padStart(2, '0')}.png" loading="lazy" />`
-        : '';
-      const regen = s.imagem.existe
-        ? `<button class="regen" data-action="regen-imagem" data-slide="${s.id}" title="Regenerar imagem (novo seed)">↻</button>`
-        : '';
-      const del = s.imagem.existe
-        ? `<button class="del" data-action="del-imagem" data-slide="${s.id}" title="Excluir imagem">🗑</button>`
-        : '';
-      const badge = s.imagem.existe
-        ? (s.imagem.desatualizado ? '<span class="badge alerta">prompt alterado</span>' : '<span class="badge ok">ok</span>')
-        : '<span class="badge erro">pendente</span>';
-      const prompt = s.imagem.prompt
-        ? `<details class="img-detalhe"><summary>prompt usado</summary><p>${esc(s.imagem.prompt)}</p></details>`
-        : '';
-      return `<div class="img-card ${s.imagem.existe ? '' : 'faltando'}" data-idx="${s.idx}">${img}${regen}${del}
-        <div class="img-info"><span>${esc(s.titulo)}</span>${badge}</div>${prompt}</div>`;
-    })
-    .join('');
+function renderBloco(item) {
+  const isSlide = item.tipo === 'slide';
+  const midia = [];
 
-  el.innerHTML = `
-    <div class="etapa-topo">
-      <h3>Imagens dos slides</h3>
-      <div class="etapa-acoes">
-        <button class="btn btn-perigo" data-action="gerar-todas-imagens-recriar" title="Apaga as atuais e gera todas de novo">↺ Recriar todas</button>
-        <button class="btn btn-primario" data-action="gerar-todas-imagens">Gerar as que faltam</button>
+  if (item.imagem?.existe) {
+    midia.push(`
+      <div class="bloco-img">
+        <img src="/media/${esc(estado.slug)}/slide-${String(item.idx).padStart(2, '0')}.png" alt="${esc(item.titulo)}" loading="lazy" title="Clique para ampliar" />
+        ${item.imagem.desatualizado ? '<div class="sobreposto-desatualizado">prompt alterado</div>' : ''}
+      </div>`);
+  } else if (isSlide) {
+    midia.push('<div class="bloco-img vazio">imagem pendente</div>');
+  }
+
+  midia.push(`
+    <div class="bloco-audio">
+      ${item.audio?.existe
+        ? `<audio controls preload="none" src="/media/${esc(estado.slug)}/${esc(item.prefix)}-narracao.mp3"></audio>
+           ${item.audio.desatualizado ? '<span class="badge alerta">texto alterado</span>' : '<span class="badge ok">ok</span>'}`
+        : '<span class="msg-progresso">sem áudio ainda</span>'}
+    </div>`);
+
+  // botões de ação: imagem apenas para slides; áudio para todos os itens
+  const botoes = [];
+  if (isSlide) {
+    if (item.imagem?.existe) {
+      botoes.push(`<button class="btn btn-mini regen" data-action="regen-imagem" data-slide="${esc(item.id)}" title="Regenerar imagem (seed nova)">↻ imagem</button>`);
+      botoes.push(`<button class="btn btn-mini btn-perigo" data-action="del-imagem" data-slide="${esc(item.id)}" title="Excluir imagem">🗑</button>`);
+    } else {
+      botoes.push(`<button class="btn btn-mini regen" data-action="regen-imagem" data-slide="${esc(item.id)}" title="Gerar imagem">🖼 imagem</button>`);
+    }
+  }
+  if (item.audio?.existe) {
+    botoes.push(`<button class="btn btn-mini btn-perigo" data-action="del-narracao" data-slide="${esc(item.id)}" title="Excluir áudio">🗑</button>`);
+  }
+  botoes.push(`<button class="btn btn-mini regen" data-action="regen-narracao" data-slide="${esc(item.id)}" title="Regenerar áudio">🔊 áudio</button>`);
+
+  return `
+    <div class="bloco" data-id="${esc(item.id)}">
+      <div class="bloco-cab">
+        <span class="bloco-tipo">${esc(item.rotulo)}</span>
+        <div class="bloco-acao">${botoes.join('')}</div>
       </div>
-    </div>
-    <p class="msg-progresso">Imagens genéricas e tranquilas (céu pastel, campos, flores…), geradas via ComfyUI. Tempo varia com o hardware. "↻" regenera uma imagem com seed aleatório.</p>
-    <div class="grid-imagens">${cards}</div>`;
-}
-
-// ---------------------------------------------------------------------------
-// Etapa 3 — Narração
-// ---------------------------------------------------------------------------
-function renderEtapa3(el) {
-  const st = estado.artefatos;
-  const itens = [
-    { id: 'intro', rotulo: 'Introdução', prefix: '00-intro', audio: st.intro },
-    ...st.slides.map((s) => ({ id: s.id, rotulo: s.titulo, prefix: String(s.idx).padStart(2, '0'), audio: s.audio })),
-    { id: 'conclusao', rotulo: 'Conclusão', prefix: st.slides.length ? `${String(st.slides.length + 1).padStart(2, '0')}-conclusao` : '01-conclusao', audio: st.conclusao },
-  ];
-  const lista = itens
-    .map((it) => {
-      const badge = it.audio.existe
-        ? (it.audio.desatualizado ? '<span class="badge alerta">texto alterado</span>' : '<span class="badge ok">ok</span>')
-        : '<span class="badge erro">pendente</span>';
-      return `<div class="item-audio">
-        <span class="rotulo">${esc(it.rotulo)}</span>
-        ${it.audio.existe ? `<audio controls preload="none" src="/media/${estado.slug}/${it.prefix}-narracao.mp3"></audio>` : '<span class="msg-progresso">sem áudio ainda</span>'}
-        ${badge}
-        <button class="btn btn-mini regen" data-action="regen-narracao" data-slide="${it.id}">↻ regenerar</button>
-        ${it.audio.existe ? `<button class="btn btn-mini btn-perigo" data-action="del-narracao" data-slide="${it.id}">🗑 excluir</button>` : ''}
-      </div>`;
-    })
-    .join('');
-
-  el.innerHTML = `
-    <div class="etapa-topo">
-      <h3>Narrações</h3>
-      <div class="etapa-acoes">
-        <button class="btn btn-primario" data-action="gerar-todas-narracao">Gerar as que faltam</button>
-        <button class="btn btn-perigo" data-action="recriar-todas-narracao">🗑 Apagar todas e regerar</button>
+      ${item.titulo ? `<div class="bloco-titulo">${esc(item.titulo)}</div>` : ''}
+      <div class="bloco-texto">${esc(item.texto)}</div>
+      <div class="bloco-media">
+        ${midia.join('')}
       </div>
-    </div>
-    <p class="msg-progresso">Motor: <strong>${esc(estado.config?.TTS || 'edge-tts')}</strong> · Voz: <strong>${esc(estado.config?.VOZ || 'pt-BR-FranciscaNeural')}</strong> (${estado.config?.TTS === 'qwen' ? 'clone da Bia via Qwen3-TTS' : 'edge-tts'}). Textos inalterados reutilizam o MP3 existente; use "↻ regenerar" para forçar.</p>
-    ${lista}`;
+    </div>`;
 }
 
-// ---------------------------------------------------------------------------
-// Etapa 4 — Vídeo
-// ---------------------------------------------------------------------------
-function renderEtapa4(el) {
+function renderTelaUnica() {
+  if (!estado.roteiro || !estado.artefatos) return;
   const st = estado.artefatos;
+  estado.unificado = unificar();
+
+  const itensHtml = estado.unificado.map(renderBloco).join('');
+
+  const podeVideo = st?.imagensCompletas && st?.audioCompleto;
   const problemas = [];
-  if (!st.imagensCompletas) problemas.push('faltam imagens (etapa 2)');
-  if (!st.audioCompleto) problemas.push('faltam narrações (etapa 3)');
-  const pode = problemas.length === 0;
+  if (!st?.imagensCompletas) problemas.push('faltam imagens (etapa 2)');
+  if (!st?.audioCompleto) problemas.push('faltam narrações (etapa 3)');
+
   const formato = (estado.config?.FORMATO || '16:9').trim();
   const resPadrao = formato === '9:16' ? '1080,1920' : '1920,1080';
   const selRes = (v) => (v === resPadrao ? ' selected' : '');
   const [wPadrao, hPadrao] = resPadrao.split(',');
-  const videos = (st.videos || [])
-    .map((v) => `
-    <div class="video-item">
-      <div class="video-rotulo">${esc(v.arquivo)}
-        <button class="btn btn-mini btn-perigo" data-action="del-video" data-arquivo="${esc(v.arquivo)}">🗑 excluir</button>
-      </div>
-      <video class="player-video" controls src="/media/${estado.slug}/${esc(v.arquivo)}"></video>
-    </div>`)
-    .join('');
 
-  el.innerHTML = `
+  const videos = (st?.videos || [])
+    .map((v) => `
+      <div class="video-item">
+        <div class="video-rotulo">
+          <span>
+            ${esc(v.arquivo)}${v.existe === false ? ' · inexistente' : ''}
+          </span>
+          <button class="btn btn-mini btn-perigo" data-action="del-video" data-arquivo="${esc(v.arquivo)}">🗑 excluir</button>
+        </div>
+        <video class="player-video" controls src="/media/${esc(estado.slug)}/${esc(v.arquivo)}"></video>
+      </div>`).join('');
+
+  const tituloVideo = st?.video?.existe
+    ? `<span class="badge ok">pronto</span> <span class="msg-progresso">• ${esc(st.video.arquivo)}</span>`
+    : `<span class="msg-progresso" style="color:var(--alerta)">sem vídeo ainda</span>`;
+
+  $('#etapa-container').innerHTML = `
     <div class="etapa-topo">
-      <h3>Montagem do vídeo</h3>
-      <button class="btn btn-primario" data-action="montar-video" ${pode ? '' : 'disabled'}>🎬 Montar vídeo</button>
-    </div>
-    ${pode ? '' : `<p class="msg-progresso" style="color:var(--alerta)">⚠ ${problemas.join(' · ')}</p>`}
-    <div class="cartao">
-      <div class="video-config">
-        <label>FPS
-          <select name="cfg-fps" id="cfg-fps"><option>24</option><option selected>30</option><option>60</option></select>
-        </label>
-        <label>Resolução (formato: ${formato})
-          <select name="cfg-res" id="cfg-res">
-            <optgroup label="Horizontal 16:9">
-              <option value="3840,2160"${selRes('3840,2160')}>3840×2160 · 4K</option>
-              <option value="1920,1080"${selRes('1920,1080')}>1920×1080 · Full HD</option>
-              <option value="1280,720"${selRes('1280,720')}>1280×720 · HD</option>
-            </optgroup>
-            <optgroup label="Vertical 9:16 (Reels/TikTok)">
-              <option value="2160,3840"${selRes('2160,3840')}>2160×3840 · 4K vertical</option>
-              <option value="1080,1920"${selRes('1080,1920')}>1080×1920 · Full HD vertical</option>
-              <option value="720,1280"${selRes('720,1280')}>720×1280 · HD vertical</option>
-            </optgroup>
-            <option value="custom">Personalizado…</option>
-          </select>
-        </label>
-        <label>Largura (custom) <input name="cfg-width" id="cfg-width" type="number" value="${wPadrao}" min="320" step="16" /></label>
-        <label>Altura (custom) <input name="cfg-height" id="cfg-height" type="number" value="${hPadrao}" min="240" step="16" /></label>
-        <label>Segundos de margem/slide <input name="cfg-padding" id="cfg-padding" type="number" value="0.3" min="0" step="0.1" /></label>
-      </div>
-      <p class="msg-progresso">O vídeo sai como <strong>&lt;slug&gt;-&lt;largura&gt;x&lt;altura&gt;.mp4</strong>. Gere um formato por vez (Configurações &gt; FORMATO) — as imagens são geradas na proporção do formato escolhido.</p>
-      <div id="area-progresso-video" hidden>
-        <div class="msg-progresso" id="msg-progresso-video">Preparando…</div>
-        <div class="barra-progresso"><div id="barra-progresso-video"></div></div>
+      <h3>Roteiro, imagens, áudio e vídeo</h3>
+      <div class="etapa-acoes">
+        <button class="btn btn-primario" data-action="montar-video" ${podeVideo ? '' : 'disabled'}>🎬 Montar vídeo</button>
+        <button class="btn" data-action="gerar-todas-imagens">🖼 Gerar/atualizar imagens</button>
+        <button class="btn" data-action="gerar-todas-narracao">🔊 Gerar/atualizar áudio</button>
+        <button class="btn btn-perigo" data-action="regenerar-roteiro">↺ Regenerar roteiro</button>
+        <button class="btn btn-primario" data-action="salvar-roteiro">💾 Salvar alterações</button>
       </div>
     </div>
-    ${videos}`;
+    ${podeVideo ? '' : `<p class="msg-progresso" style="color:var(--alerta)">⚠ ${problemas.join(' · ')}</p>`}
+    <div class="bloco-unificado">${itensHtml}</div>
+
+    <section class="bloco-video">
+      <div class="etapa-topo">
+        <h3>Vídeo final</h3>
+        <div class="etapa-acoes">${tituloVideo}</div>
+      </div>
+      ${podeVideo ? '' : `
+        <div class="cartao">
+          <div class="video-config">
+            <label>FPS
+              <select name="cfg-fps" id="cfg-fps"><option>24</option><option selected>30</option><option>60</option></select>
+            </label>
+            <label>Resolução (formato: ${formato})
+              <select name="cfg-res" id="cfg-res">
+                <optgroup label="Horizontal 16:9">
+                  <option value="3840,2160"${selRes('3840,2160')}>3840×2160 · 4K</option>
+                  <option value="1920,1080"${selRes('1920,1080')}>1920×1080 · Full HD</option>
+                  <option value="1280,720"${selRes('1280,720')}>1280×720 · HD</option>
+                </optgroup>
+                <optgroup label="Vertical 9:16 (Reels/TikTok)">
+                  <option value="2160,3840"${selRes('2160,3840')}>2160×3840 · 4K vertical</option>
+                  <option value="1080,1920"${selRes('1080,1920')}>1080×1920 · Full HD vertical</option>
+                  <option value="720,1280"${selRes('720,1280')}>720×1280 · HD vertical</option>
+                </optgroup>
+                <option value="custom">Personalizado…</option>
+              </select>
+            </label>
+            <label>Largura (custom) <input name="cfg-width" id="cfg-width" type="number" value="${wPadrao}" min="320" step="16" /></label>
+            <label>Altura (custom) <input name="cfg-height" id="cfg-height" type="number" value="${hPadrao}" min="240" step="16" /></label>
+            <label>Segundos de margem/slide <input name="cfg-padding" id="cfg-padding" type="number" value="0.3" min="0" step="0.1" /></label>
+          </div>
+          <p class="msg-progresso">O vídeo sai como &lt;slug&gt;-&lt;largura&gt;x&lt;altura&gt;.mp4. Gere um formato por vez (Configurações &gt; FORMATO).</p>
+          <div id="area-progresso-video" hidden>
+            <div class="msg-progresso" id="msg-progresso-video">Preparando…</div>
+            <div class="barra-progresso"><div id="barra-progresso-video"></div></div>
+          </div>
+        </div>`}
+      ${videos}
+      ${podeVideo && st.video?.arquivo
+        ? `<div class="video-descricao">
+             <h4>Descrição do texto</h4>
+             <p>${esc(rI().introducao)} ${esc(rI().slides.map((s) => s.narracao).join(' '))} ${esc(rI().conclusao)}</p>
+           </div>`
+        : ''}
+    </section>`;
+
+  // reattach listeners via delegação
 }
 
-function setProgressoVideo(pct, texto) {
-  const area = $('#area-progresso-video');
-  if (!area) return;
-  area.hidden = false;
-  $('#barra-progresso-video').style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  $('#msg-progresso-video').textContent = texto || '…';
+function rI() {
+  return estado.roteiro || { introducao: '', conclusao: '', slides: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -481,7 +338,7 @@ async function salvarRoteiro() {
     await api(`/api/roteiro/${estado.slug}`, { method: 'PUT', body: JSON.stringify(estado.roteiro) });
     await carregarArtefatos();
     toast('Roteiro salvo. Áudios de textos alterados ficam marcados como desatualizados.');
-    mudarEtapa(1);
+    renderTelaUnica();
   } catch (e) {
     toast(e.message, true);
   }
@@ -496,7 +353,7 @@ async function regenerarRoteiro() {
     estado.roteiro = res.roteiro;
     await carregarArtefatos();
     $('#titulo-aula').textContent = estado.roteiro.titulo_aula;
-    mudarEtapa(1);
+    renderTelaUnica();
     toast('Roteiro regenerado.');
   } catch (e) {
     toast(e.message, true);
@@ -523,7 +380,7 @@ async function rodarJob(promise, mensagemOk) {
     await promise;
     toast(mensagemOk);
     await carregarArtefatos();
-    mudarEtapa(estado.etapa);
+    renderTelaUnica();
   } catch (e) {
     if (estado.cancelado) toast('Job cancelado.');
     else toast(e.message, true);
@@ -534,39 +391,76 @@ async function rodarJob(promise, mensagemOk) {
   }
 }
 
+function setProgressoVideo(pct, linha) {
+  const msg = $('#msg-progresso-video');
+  const bar = $('#barra-progresso-video');
+  if (!msg || !bar) return;
+  msg.textContent = linha;
+  bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function lerRoteiroDoDOM() {
+  // a tela única não possui inputs editáveis — os textos estão em divs.
+  // (Edição de texto do roteiro é feita via regeneração do roteiro.)
+}
+
+let _jobClearT = null;
+
+function formatarMin(s) {
+  if (!s || s <= 0) return '';
+  return s >= 60 ? `~${Math.round(s / 60)} min` : `~${Math.max(1, s)} s`;
+}
+
+function renderStatusJob() {
+  const el = $('#status-job');
+  const job = estado.job;
+  if (!job) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = `status-job ${job.status}`;
+  const rotulo = NOME_ETAPA[job.etapa] || job.etapa;
+  const icone =
+    job.status === 'ok' ? '✓' :
+    job.status === 'erro' ? '✕' : '🔍';
+  const statusTexto = job.status === 'ok' ? `${rotulo} concluída com sucesso` :
+    job.status === 'erro' ? (job.cancelado ? `${rotulo} cancelado` : `${rotulo} falhou`) : `${rotulo} em andamento`;
+  el.innerHTML = `
+    <span class="status-icone">${icone}</span>
+    <div class="status-texto">
+      <strong>${statusTexto}</strong>
+      <span>${esc(job.msg || '')}</span>
+      ${job.eta != null ? `<span class="msg-eta">restante ${formatarMin(job.eta)}</span>` : ''}
+      ${job.pct != null ? `<div class="barra-progresso status-barra"><div style="width:${Math.max(0, Math.min(100, job.pct))}%"></div></div>` : ''}
+    </div>
+    ${job.status === 'rodando' ? '<button class="btn btn-mini btn-perigo" id="btn-cancelar-job" title="Encerrar o job atual">⏹ Cancelar</button>' : ''}`;
+  const b = $('#btn-cancelar-job');
+  if (b) b.onclick = cancelarJob;
+}
+
+function sincronizarBotoes() {
+  document.querySelectorAll('#etapa-container .btn').forEach((b) => (b.disabled = estado.jobAtivo));
+}
+
 // ---------------------------------------------------------------------------
-// Delegação de eventos (etapa container)
+// Delegação de eventos (container unificado)
 // ---------------------------------------------------------------------------
 $('#etapa-container').addEventListener('click', async (ev) => {
-  const img = ev.target.closest('.img-card img');
+  const img = ev.target.closest('.bloco-img img');
   if (img) {
-    const card = img.closest('.img-card');
-    if (card?.dataset.idx) abrirModalSlide(Number(card.dataset.idx) - 1);
+    const bloco = img.closest('.bloco');
+    if (bloco?.dataset.id) abrirModalSlide(bloco.dataset.id);
     return;
   }
   const btn = ev.target.closest('button[data-action]');
   if (!btn) return;
   const acao = btn.dataset.action;
   const slideId = btn.dataset.slide;
-  const i = btn.dataset.slide;
+  const arquivo = btn.dataset.arquivo;
 
   if (acao === 'salvar-roteiro') return salvarRoteiro();
   if (acao === 'regenerar-roteiro') return regenerarRoteiro();
-  if (acao === 'add-slide') {
-    estado.roteiro.slides.push({
-      id: `slide-${String(estado.roteiro.slides.length + 1).padStart(2, '0')}`,
-      titulo: 'Novo slide',
-      narracao: '',
-      imagem_prompt: 'noah hammering on a giant wooden ark while small birds and animals peek out from the windows',
-    });
-    return mudarEtapa(1);
-  }
-  if (acao === 'del-slide') {
-    if (!confirm(`Remover o slide ${Number(i) + 1}?`)) return;
-    estado.roteiro.slides.splice(Number(i), 1);
-    renumerarSlides();
-    return mudarEtapa(1);
-  }
   if (acao === 'regen-imagem') {
     return rodarJob(api(`/api/imagens/${estado.slug}`, { method: 'POST', body: JSON.stringify({ slideId, variar: true }) }), 'Imagem regenerada.');
   }
@@ -577,10 +471,6 @@ $('#etapa-container').addEventListener('click', async (ev) => {
   if (acao === 'gerar-todas-imagens') {
     return rodarJob(api(`/api/imagens/${estado.slug}`, { method: 'POST', body: JSON.stringify({}) }), 'Imagens atualizadas.');
   }
-  if (acao === 'gerar-todas-imagens-recriar') {
-    if (!confirm('Apagar todas as imagens atuais e gerar do zero? Isso pode levar vários minutos.')) return;
-    return rodarJob(api(`/api/imagens/${estado.slug}`, { method: 'POST', body: JSON.stringify({ recriarTodos: true, variar: true }) }), 'Todas as imagens foram recriadas.');
-  }
   if (acao === 'regen-narracao') {
     return rodarJob(api(`/api/narracao/${estado.slug}`, { method: 'POST', body: JSON.stringify({ slideId }) }), 'Narração regenerada.');
   }
@@ -590,10 +480,6 @@ $('#etapa-container').addEventListener('click', async (ev) => {
   }
   if (acao === 'gerar-todas-narracao') {
     return rodarJob(api(`/api/narracao/${estado.slug}`, { method: 'POST', body: JSON.stringify({}) }), 'Narrações atualizadas.');
-  }
-  if (acao === 'recriar-todas-narracao') {
-    if (!confirm('Apagar TODOS os áudios atuais e gerar tudo de novo? Isso pode levar vários minutos.')) return;
-    return rodarJob(api(`/api/narracao/${estado.slug}`, { method: 'POST', body: JSON.stringify({ recriarTodos: true }) }), 'Todas as narrações foram regeneradas.');
   }
   if (acao === 'montar-video') {
     const fps = $('#cfg-fps').value;
@@ -606,7 +492,6 @@ $('#etapa-container').addEventListener('click', async (ev) => {
     );
   }
   if (acao === 'del-video') {
-    const arquivo = btn.dataset.arquivo;
     if (!confirm(`Excluir o vídeo "${arquivo}"?`)) return;
     return rodarJob(api(`/api/video/${estado.slug}`, { method: 'DELETE', body: JSON.stringify({ arquivo }) }), 'Vídeo excluído.');
   }
@@ -629,6 +514,10 @@ $('#etapa-container').addEventListener('input', (ev) => {
     }
   }
 });
+
+function contarPalavras(texto) {
+  return (texto.trim().match(/\S+/g) || []).length;
+}
 
 // ---------------------------------------------------------------------------
 // Configurações
@@ -689,12 +578,22 @@ $('#btn-nova-aula').onclick = async () => {
     if (aulas.some(a => a.slug === slug)) {
       return toast(`Já existe uma aula com este tópico ("${slug}").`, true);
     }
+    // entra na tela da aula imediatamente para mostrar o progresso via SSE
+    estado.slug = slug;
+    $('#titulo-aula').textContent = topico;
+    $('#etapa-container').innerHTML =
+      '<div class="cartao"><p class="msg-progresso">⏳ Gerando roteiro… o progresso aparece no banner.</p></div>';
+    mostrarTela('aula');
     const res = await api('/api/roteiro', { method: 'POST', body: JSON.stringify({ topico }) });
     $('#input-topico').value = '';
-    await abrirAula(res.slug);
-    toast('Roteiro gerado! Revise o texto na etapa Roteiro.');
+    estado.roteiro = res.roteiro;
+    await carregarArtefatos();
+    $('#titulo-aula').textContent = estado.roteiro.titulo_aula;
+    renderTelaUnica();
+    toast('Roteiro gerado! Revise o texto na tela única.');
   } catch (e) {
     toast(e.message, true);
+    mostrarTela('dashboard');
   }
 };
 $('#input-topico').addEventListener('keydown', (ev) => {
@@ -708,7 +607,7 @@ $('#btn-atualizar').onclick = async () => {
   try {
     await Promise.all([carregarRoteiro(), carregarArtefatos()]);
     $('#titulo-aula').textContent = estado.roteiro.titulo_aula;
-    mudarEtapa(estado.etapa);
+    renderTelaUnica();
     toast('Aula atualizada.');
   } catch (e) {
     toast(e.message, true);
@@ -752,7 +651,6 @@ sse.addEventListener('progresso', (ev) => {
       estado.job.msg = msg.linha;
       const m = /\((\d+)%\)$/.exec(msg.linha);
       estado.job.pct = m ? Number(m[1]) : estado.job.pct;
-      // ETA para a etapa de imagens (tempo por imagem já gerada × restantes)
       if (estado.job.etapa === 'imagens') {
         const mi = /\[imagem\s+(\d+)\/(\d+)\]/.exec(msg.linha);
         if (mi && estado.job.inicioMs) {
@@ -782,7 +680,7 @@ sse.addEventListener('progresso', (ev) => {
   if (msg.tipo === 'fim') {
     estado.jobAtivo = false;
     sincronizarBotoes();
-    if (estado.etapa === 4) setProgressoVideo(msg.ok ? 100 : 0, msg.ok ? 'Vídeo pronto!' : 'Falha na montagem');
+    if (estado.tela === 'aula') renderTelaUnica();
     estado.job = {
       etapa: msg.etapa,
       status: msg.ok ? 'ok' : 'erro',
@@ -795,14 +693,8 @@ sse.addEventListener('progresso', (ev) => {
       estado.job = null;
       renderStatusJob();
     }, 8000);
-    setTimeout(() => {
-      if (estado.tela === 'aula') {
-        carregarArtefatos();
-        mudarEtapa(estado.etapa);
-      }
-    }, 400);
   }
-  if (msg.etapa === 'video' && msg.tipo === 'progress' && estado.etapa === 4) {
+  if (msg.etapa === 'video' && msg.tipo === 'progress' && estado.tela === 'aula') {
     const m = /\((\d+)%\)/.exec(msg.linha);
     setProgressoVideo(m ? Number(m[1]) : 0, msg.linha);
   }

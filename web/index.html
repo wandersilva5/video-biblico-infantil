@@ -69,6 +69,17 @@
       <label>ZIMAGE_CLIP <input data-cfg="ZIMAGE_CLIP" name="cfg-ZIMAGE_CLIP" type="text" /></label>
       <label>ZIMAGE_VAE <input data-cfg="ZIMAGE_VAE" name="cfg-ZIMAGE_VAE" type="text" /></label>
       <label>ZIMAGE_LORA <input data-cfg="ZIMAGE_LORA" name="cfg-ZIMAGE_LORA" type="text" /></label>
+      <label>ZIMAGE_STEPS <input data-cfg="ZIMAGE_STEPS" name="cfg-ZIMAGE_STEPS" type="number" min="1" max="50" /></label>
+      <label>ZIMAGE_LORA_STRENGTH <input data-cfg="ZIMAGE_LORA_STRENGTH" name="cfg-ZIMAGE_LORA_STRENGTH" type="number" min="0" max="2" step="0.1" /></label>
+      <label>CLIP na RAM ou GPU (QWEN_CLIP_DEVICE)
+        <select data-cfg="QWEN_CLIP_DEVICE" name="cfg-QWEN_CLIP_DEVICE">
+          <option value="cpu">cpu (RAM — recomendado em 8GB de VRAM)</option>
+          <option value="default">default (GPU)</option>
+        </select>
+      </label>
+      <label>MIN_SLIDES (cenas por história) <input data-cfg="MIN_SLIDES" name="cfg-MIN_SLIDES" type="number" min="4" max="30" /></label>
+      <label>VOZ_RATE (ritmo) <input data-cfg="VOZ_RATE" name="cfg-VOZ_RATE" type="text" /></label>
+      <label>VOZ_PITCH (tom) <input data-cfg="VOZ_PITCH" name="cfg-VOZ_PITCH" type="text" /></label>
       <label>Motor de TTS
         <select data-cfg="TTS" name="cfg-TTS">
           <option value="edge-tts">edge-tts</option>
