@@ -27,7 +27,7 @@ const DEFAULTS = {
   ZIMAGE_LORA_STRENGTH: '1.0',
   QWEN_CLIP_DEVICE: 'cpu',
   ESTILO_SUFIXO:
-    'Pixar 3D animation style, high quality 3D render, vibrant colors, expressive cartoon characters with big eyes, soft studio lighting, cinematic composition, friendly and warm atmosphere, children animated movie aesthetic, consistent character design',
+    "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes and paper texture, hand-drawn storybook art, soft warm pastel palette, simple flat shading, charming naive children's book style, absolutely not 3D not CGI not photorealistic",
   MIN_SLIDES: '12',
   TTS: 'edge-tts',
   VOZ: 'pt-BR-FranciscaNeural',

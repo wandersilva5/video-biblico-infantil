@@ -51,7 +51,8 @@ Gere SEMPRE um JSON válido, sem markdown, sem texto extra, com esta estrutura e
       "id": "slide-01",
       "titulo": "Título curto do slide (max 6 palavras, linguagem simples)",
       "narracao": "25-35 palavras narradas, frases curtas, contando a história de forma acolhedora e lúdica, sem citar referências bíblicas",
-      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS UMA cena ÚNICA da história, como em um filme de animação 3D (personagens e objetos da história, o que está acontecendo, o cenário). NÃO inclua estilo nem palavras sobre texto — o estilo (Pixar 3D) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'"
+      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS UMA cena ÚNICA da história, como a ilustração de um livro infantil (personagens e objetos da história, o que está acontecendo, o cenário). VARIE o enquadramento entre os slides: close no rosto, plano médio, plano aberto, ângulo alto/baixo, personagem em ação — nunca duas cenas com o mesmo enquadramento seguidas. NÃO inclua estilo nem palavras sobre texto — o estilo (2D de livro infantil) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'",
+      "personagens": "APENAS os personagens que aparecem NESTA cena, com a aparência copiada do campo personagens global, separados por ponto e vírgula. NUNCA liste quem não está na cena. Ex.: 'Noah: elderly man with a long white beard, kind blue eyes, sturdy build, simple brown robe and leather sandals'"
     }
   ],
   "conclusao": "2-4 frases de encerramento narradas: uma moral simples para a criança e o convite para curtir e se inscrever no canal para ouvir mais historinhas bíblicas"
@@ -60,6 +61,7 @@ Gere SEMPRE um JSON válido, sem markdown, sem texto extra, com esta estrutura e
 REGRAS:
 - Total de slides: de 12 a 16. A história inteira deve ser contada em slides, sem pular partes. Quanto mais cenas importantes, mais slides.
 - UMA CENA POR SLIDE: cada slide mostra UM único momento ou UMA única ação da história. NUNCA junte duas ações nem dois momentos diferentes no mesmo slide. Quando a cena muda (outro lugar, outro momento, outra ação), comece um novo slide. A primeira imagem de cada slide precisa deixar claro qual é esse momento.
+- PERSONAGENS POR SLIDE: o campo personagens de cada slide lista SÓ quem aparece naquela cena (copiando a aparência do personagens global). Se todos os personagens entram em todos os prompts, o ilustrador desenha o elenco inteiro em toda cena e as imagens ficam todas iguais — por isso liste apenas quem está presente.
 - Cada narração de slide: 25-35 palavras (aprox. 12-20 segundos falados).
 - TOM DA NARRAÇÃO: empolgado e alegre, como uma pessoa contando uma historinha para uma criança bem pequena, daquelas que dão vontade de ouvir até o fim. Use frases curtas, exclamações, alguma pergunta direta para a criança ("Sabe o que aconteceu?", "E adivinha?") e palavras sonoras que a criança gosta de repetir. Nada de tom de livro velho: é voz de quem está se divertindo contando.
 - Conteúdo: histórias bíblicas infantis conhecidas (a criação, a Arca de Noé, Abraão, Moisés e o mar Vermelho, Davi e Golias, Jonas e o grande peixe, Daniel na cova dos leões, o nascimento de Jesus, Zaqueu, o bom samaritano, a multiplicação dos pães, etc.). O usuário pode pedir qualquer história bíblica.

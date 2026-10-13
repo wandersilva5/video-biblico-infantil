@@ -9,7 +9,12 @@ rem  Historinhas Biblicas Infantis - inicializacao
 rem  Verifica/sobe os 3 servidores e encerra todos ao fechar esta janela.
 rem   1) llama-server  -> http://127.0.0.1:8091   (roteiro)
 rem   2) ComfyUI       -> http://127.0.0.1:8188   (imagens)
-rem   3) servidor web  -> http://localhost:PORTA  (interface)
+rem   3) servidor web  -> http://localhost:PORTA  (interface React)
+rem
+rem  A interface (web/) e React com rotas por hash (#/ e #/aula/:slug),
+rem  sem build: react/htm vendored em web/vendor/. O servidor web e
+rem  reiniciado sempre que este script roda, para servir o frontend
+rem  e o backend atualizados.
 rem =====================================================================
 
 set "LLAMA_EXE=E:\llama.cpp\llama-server.exe"
@@ -82,22 +87,19 @@ if "!COMFY_OK!"=="1" (
 )
 call :registrar_pid "%COMFY_PORT%"
 
-call :verificar_http "http://127.0.0.1:%PORTA%/" WEB_OK
+rem ---- Servidor web: SEMPRE reinicia (garante frontend/backend atualizados) ----
+echo   [3/3] servidor web ........ reiniciando...
+echo   [3/3] servidor web ........ reiniciando... >> "%LOG_FILE%"
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r ":%PORTA% " ^| findstr "LISTENING"') do taskkill /F /PID %%p >nul 2>nul
+timeout /t 1 /nobreak >nul 2>nul
+start "servidor-historinhas" /min cmd /c "set PORTA=%PORTA%&& node scripts\servidor.mjs"
+call :aguardar_http "http://127.0.0.1:%PORTA%/" WEB_OK 30 "servidor web"
 if "!WEB_OK!"=="1" (
-  echo   [3/3] servidor web ........ JA EM EXECUCAO
-  echo   [3/3] servidor web ........ JA EM EXECUCAO >> "%LOG_FILE%"
+  echo         [OK] servidor web pronto ^(interface React^).
+  echo         [OK] servidor web pronto. >> "%LOG_FILE%"
 ) else (
-  echo   [3/3] servidor web ........ iniciando...
-  echo   [3/3] servidor web ........ iniciando... >> "%LOG_FILE%"
-  start "servidor-historinhas" /min cmd /c "set PORTA=%PORTA%&& node scripts\servidor.mjs"
-  call :aguardar_http "http://127.0.0.1:%PORTA%/" WEB_OK 30 "servidor web"
-  if "!WEB_OK!"=="1" (
-    echo         [OK] servidor web pronto.
-    echo         [OK] servidor web pronto. >> "%LOG_FILE%"
-  ) else (
-    echo         [ERRO] servidor web nao subiu em 30s. Veja a janela minimizada.
-    echo         [ERRO] servidor web nao subiu em 30s. >> "%LOG_FILE%"
-  )
+  echo         [ERRO] servidor web nao subiu em 30s. Veja a janela minimizada.
+  echo         [ERRO] servidor web nao subiu em 30s. >> "%LOG_FILE%"
 )
 call :registrar_pid "%PORTA%"
 
@@ -110,7 +112,8 @@ if "!WEB_OK!"=="1"   ( echo   servidor web : OK ) else ( echo   servidor web : P
 echo.
 if "!LLAMA_OK!"=="1" if "!COMFY_OK!"=="1" if "!WEB_OK!"=="1" (
   echo   Tudo pronto. Abrindo a interface em http://localhost:%PORTA%
-  start "" "http://localhost:%PORTA%"
+  rem  ?v= quebra cache do navegador (garante o frontend React novo)
+  start "" "http://localhost:%PORTA%/?v=%RANDOM%%RANDOM%"
 ) else (
   echo   Alguns servidores falharam. Verifique as janelas minimizadas
   echo   e o arquivo .iniciar.log para mais detalhes.

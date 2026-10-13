@@ -492,3 +492,132 @@ input, textarea, select { font: inherit; }
   .passo { flex: 0 0 auto; }
   .conteudo { padding: 20px 16px; }
 }
+
+/* ---------- Interface React (tela única com rotas) ---------- */
+.conteudo-full {
+  max-width: 1200px; margin: 0 auto; padding: 26px 30px 60px; min-width: 0;
+}
+
+@media (max-width: 860px) {
+  .conteudo-full { padding: 20px 16px 50px; }
+}
+
+/* Progresso por item (imagem/áudio em geração) */
+.prog-item {
+  width: 100%; display: flex; flex-direction: column; gap: 8px;
+  align-items: center; justify-content: center; padding: 18px 14px;
+}
+.prog-item-rotulo {
+  font-size: 13px; font-weight: 600; color: var(--ouro-suave);
+  animation: pulseTexto 1.4s ease-in-out infinite;
+}
+@keyframes pulseTexto {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.prog-item .barra-progresso { width: 100%; max-width: 320px; margin: 0; }
+
+/* Placeholder de imagem em geração */
+.bloco-img.gerando {
+  background: linear-gradient(110deg, var(--painel) 8%, var(--painel-2) 18%, var(--painel) 33%);
+  background-size: 200% 100%;
+  animation: skel 1.6s linear infinite;
+}
+@keyframes skel {
+  to { background-position-x: -200%; }
+}
+
+/* Sobreposição quando regenerando sobre imagem existente */
+.overlay-regen {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 19, 32, 0.72); color: var(--ouro-suave);
+  font-weight: 700; font-size: 14px;
+  animation: pulseTexto 1.2s ease-in-out infinite;
+}
+
+/* Animação de aparição: imagem/áudio carregados durante o job */
+.bloco-img img { animation: midiaAparece 0.45s ease; }
+.bloco-audio audio { animation: midiaAparece 0.35s ease; }
+@keyframes midiaAparece {
+  from { opacity: 0; transform: scale(0.965); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Texto de alerta avulso */
+.alerta-texto { color: var(--alerta); }
+
+/* Badge pulsante durante regeneração */
+.badge.pulse { animation: pulseTexto 1.2s ease-in-out infinite; }
+
+/* ---------- Bloco em colunas: texto | imagem | áudio ---------- */
+.bloco-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px 320px;
+  gap: 18px;
+  align-items: start;
+}
+.bloco-grid.sem-img {
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+@media (max-width: 1080px) {
+  .bloco-grid, .bloco-grid.sem-img { grid-template-columns: 1fr; }
+}
+
+.bloco-col { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+
+/* Coluna de texto editável */
+.edit-titulo {
+  width: 100%; background: var(--bg-alt); border: 1px solid var(--borda);
+  color: var(--texto); border-radius: 10px; padding: 9px 12px;
+  font-size: 16px; font-weight: 700; outline: none;
+}
+.edit-titulo:focus { border-color: var(--borda-forte); }
+.edit-texto {
+  width: 100%; background: var(--bg-alt); border: 1px solid var(--borda);
+  color: var(--texto-2); border-radius: 10px; padding: 10px 12px;
+  font-size: 14px; line-height: 1.6; resize: vertical; min-height: 110px; outline: none;
+  font-family: inherit;
+}
+.edit-texto:focus { border-color: var(--borda-forte); color: var(--texto); }
+.edit-rodape {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+
+/* Coluna de imagem: miniatura com zoom */
+.thumb-wrap {
+  position: relative; border: 1px solid var(--borda); border-radius: 12px;
+  overflow: hidden; background: #000; cursor: zoom-in;
+}
+.thumb-wrap img {
+  width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: cover;
+  animation: midiaAparece 0.45s ease;
+}
+.thumb-wrap.vazio {
+  min-height: 130px; display: flex; align-items: center; justify-content: center;
+  background: var(--painel); cursor: default;
+}
+.thumb-wrap.vazio.gerando {
+  background: linear-gradient(110deg, var(--painel) 8%, var(--painel-2) 18%, var(--painel) 33%);
+  background-size: 200% 100%;
+  animation: skel 1.6s linear infinite;
+}
+.thumb-zoom {
+  position: absolute; top: 8px; right: 8px; z-index: 1;
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 19, 32, 0.78); font-size: 15px;
+  opacity: 0; transition: opacity 0.15s ease; pointer-events: none;
+}
+.thumb-wrap:hover .thumb-zoom { opacity: 1; }
+.thumb-wrap .sobreposto-desatualizado { border-radius: 0; }
+
+/* Coluna de áudio */
+.audio-area {
+  background: var(--bg-alt); border: 1px solid var(--borda);
+  border-radius: 10px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.audio-area audio { width: 100%; height: 36px; }
+.audio-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.bloco-col .bloco-acao { display: flex; gap: 6px; flex-wrap: wrap; }

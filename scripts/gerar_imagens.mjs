@@ -21,8 +21,10 @@ const LORA_NAME = process.env.ZIMAGE_LORA || 'qwen\\p_qwen_image_2.1_8step_v0.1.
 const STEPS = Number(process.env.ZIMAGE_STEPS) || 8;
 const LORA_STRENGTH = Number(process.env.ZIMAGE_LORA_STRENGTH) !== 0 ? (Number(process.env.ZIMAGE_LORA_STRENGTH) || 1.0) : 0;
 const SEED_BASE = process.env.KREA2_SEED_BASE !== undefined && process.env.KREA2_SEED_BASE !== '' ? Number(process.env.KREA2_SEED_BASE) : 1000;
-// Seed única para todas as cenas (consistência) ou uma por slide.
-const SEED_POR_SLIDE = process.env.SEED_POR_SLIDE === '1';
+// Seed POR SLIDE (variedade de composição) é o padrão — a mesma seed em todas as
+// cenas faz o modelo repetir quase a mesma imagem. SEED_POR_SLIDE=0 força seed
+// única (só faz sentido se quiser máxima "consistência" entre slides).
+const SEED_POR_SLIDE = process.env.SEED_POR_SLIDE !== '0';
 
 // Formato das imagens: derivado de FORMATO (16:9 | 9:16) ou sobrescrito por
 // IMAGEM_LARGURA/IMAGEM_ALTURA explícitos. Um formato por vez, nunca os dois.
@@ -30,13 +32,11 @@ const FORMATO = (process.env.FORMATO || '16:9').trim();
 const IMAGEM_LARGURA = Number(process.env.IMAGEM_LARGURA) || (FORMATO === '9:16' ? 640 : 1152);
 const IMAGEM_ALTURA = Number(process.env.IMAGEM_ALTURA) || (FORMATO === '9:16' ? 1152 : 640);
 
-// Upscale em 2 passos para acelerar: difusão numa resolução base menor
-// (ZIMAGE_ESCALA_BASE da final, default metade) e depois upscale lanczos para a
-// resolução final. O Qwen-image 2.1 aguenta resolução nativa e 1152x640/640x1152
-// já são múltiplos de 32 — se sua aguentar o tempo, ZIMAGE_ESCALA_BASE=1 (ou
-// ZIMAGE_UPSCALE=0) gera direto na resolução final e preserva muito mais detalhe.
-// ZIMAGE_UPSCALE=0 continua valendo como atalho para "gerar na resolução final".
-const ZIMAGE_UPSCALE = process.env.ZIMAGE_UPSCALE !== '0';
+// Qualidade: por padrão gera DIRETO na resolução final (1152x640 / 640x1152 —
+// múltiplos de 32), preservando muito mais detalhe no Qwen-image 2.1. O caminho
+// rápido em 2 passos (difusão em ~metade + upscale lanczos) fica opt-in com
+// ZIMAGE_UPSCALE=1 (combinável com ZIMAGE_ESCALA_BASE, default 0.5).
+const ZIMAGE_UPSCALE = process.env.ZIMAGE_UPSCALE === '1';
 const ESCALA_BASE = Math.min(1, Math.max(0.25, Number(process.env.ZIMAGE_ESCALA_BASE) || 0.5));
 const LARGURA_BASE = ZIMAGE_UPSCALE ? Math.round(IMAGEM_LARGURA * ESCALA_BASE / 16) * 16 : IMAGEM_LARGURA;
 const ALTURA_BASE = ZIMAGE_UPSCALE ? Math.round(IMAGEM_ALTURA * ESCALA_BASE / 16) * 16 : IMAGEM_ALTURA;
@@ -54,28 +54,38 @@ async function interromperComfyUI() {
   }
 }
 
-// Sufixo global de estilo — Pixar 3D com personagens consistentes.
+// Sufixo global de estilo — 2D de livro infantil (aguarela/gouache com textura de
+// papel). Importante: o estilo entra NO INÍCIO do prompt final (ver
+// gerarImagemSlide) — no fim de um prompt longo o modelo o ignora e renderiza 3D.
 // ESTILO_SUFIXO env sobrescreve completamente.
 const ESTILO_SUFIXO =
   process.env.ESTILO_SUFIXO ||
-  'Pixar 3D animation style, high quality 3D render, vibrant colors, expressive cartoon characters with big eyes, soft studio lighting, cinematic composition, friendly and warm atmosphere, children animated movie aesthetic, consistent character design';
+  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes and paper texture, hand-drawn storybook art, soft warm pastel palette, simple flat shading, charming naive children's book style, absolutely not 3D not CGI not photorealistic";
 
 // Prompts das artes de abertura (00-intro.png) e encerramento (outro.png).
+// SEMPRE uma professora ensinando para crianças — mas composições DIFERENTES
+// (intro: círculo de leitura; outro: aula encerrando, todo mundo acenando).
 const PROMPT_INTRO =
   process.env.PROMPT_INTRO ||
-  'A warm and friendly 3D animated storyteller woman with a gentle smile, holding an open colorful children Bible storybook, Pixar 3D animation style, two happy little children sitting nearby listening with big curious eyes, soft studio lighting, vibrant warm colors, cozy and welcoming scene';
+  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes, hand-drawn storybook art, soft warm pastel palette: a kind young woman teacher sitting in a cozy reading corner holding an open storybook, teaching a small group of happy children sitting cross-legged on a colorful rug, children listening with curious bright eyes, warm and welcoming scene";
 const PROMPT_OUTRO =
   process.env.PROMPT_OUTRO ||
-  'A cute happy 3D animated child hugging a colorful children Bible storybook, Pixar animation style, joyful ending scene with little sparkling stars and glowing hearts floating around, warm golden light, vibrant colors, soft bokeh background';
+  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes, hand-drawn storybook art, soft warm pastel palette: a kind young woman teacher standing beside a small chalkboard waving goodbye with a warm smile, a small group of happy children waving back and cheering with hands raised, joyful end-of-lesson scene with little stars and hearts floating";
 
-// Remove do imagem_prompt do roteiro o prefixo de estilo antigo (chibi/kawaii) e o
-// sufixo "no text...", deixando apenas a DESCRIÇÃO DA CENA. O estilo global e o
-// sufixo anti-texto são apensados automaticamente no prompt final.
+// Remove do imagem_prompt do roteiro o prefixo de estilo antigo (chibi/kawaii),
+// o sufixo "no text...", frases 3D embutidas ("3D animation style" etc. — o
+// estilo global agora é 2D e não pode competir) e o sufixo "no text...",
+// deixando apenas a DESCRIÇÃO DA CENA. O estilo global e o sufixo anti-texto
+// são apensados automaticamente no prompt final.
 function limparCenaDoPrompt(bruto) {
   if (!bruto) return '';
   return bruto
     .replace(/^chibi style, kawaii, cute, adorable, big sparkling eyes, soft pastel colors, children's storybook illustration, simple clean background\.?\s*/i, '')
+    .replace(/(?:,\s*)?(?:pixar\s+)?3d\s+(?:animation|animated|render(?:ing)?|style)(?:\s+style)?(?:,|\b(?=\s*(?:,|\.|$)))/gi, ',')
+    .replace(/,\s*(?=,)/g, ',')
     .replace(/\.?\s*no text, no letters, no words, no captions, no speech bubbles\.?\s*$/i, '')
+    .replace(/^,\s*|,\s*$/g, '')
+    .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
@@ -85,12 +95,13 @@ function limparCenaDoPrompt(bruto) {
 const PERSONAGENS_ANCORA =
   'identical characters, same faces, same hairstyles, same outfits, same character designs in every scene';
 
-// Prompt da imagem: descreve a CENA da história (estilo Pixar 3D), a partir do
-// imagem_prompt do roteiro. Fallback: título + narração quando não houver descrição.
+// Prompt da imagem: descreve a CENA da história (estilo 2D de livro infantil),
+// a partir do imagem_prompt do roteiro. Fallback: título + narração quando não
+// houver descrição.
 export function buildPromptImagem(slide, roteiro) {
   const cena = limparCenaDoPrompt(slide.imagem_prompt);
   const personagens = limparCenaDoPrompt(slide.personagens || roteiro?.personagens || '');
-  if (!personagens) return cena || `3D animated movie scene of ${slide.titulo}. ${slide.narracao}`.slice(0, 300);
+  if (!personagens) return cena || `children's storybook scene of ${slide.titulo}. ${slide.narracao}`.slice(0, 300);
   const partes = [`Characters: ${personagens}`, cena || `scene: ${slide.titulo}. ${slide.narracao}`];
   partes.push(PERSONAGENS_ANCORA);
   return partes.filter(Boolean).join('; ');
@@ -101,7 +112,8 @@ export function buildPromptImagem(slide, roteiro) {
 // + TextEncodeQwenImage21 (node específico com negative embutido) + KSampler 8 passos.
 // O TextEncodeQwenImage21 aceita prompt, negative_prompt e resolution num único node;
 // retorna positive + negative condicionings e latent opcional (não usado aqui).
-const NEGATIVE_PROMPT = 'low quality, low resolution, blurry, jpeg artifacts, text, letters, words, captions, speech bubble, logo, watermark, signature, bad anatomy, bad hands, extra fingers, missing fingers, deformed, ugly, distorted face, inconsistent style, multiple styles, flat 2D illustration, anime flat, sketch, pencil drawing';
+const NEGATIVE_PROMPT =
+  '3D render, 3D animation, CGI, Pixar style, dreamworks, photorealistic, photograph, octane render, unreal engine, glossy plastic skin, depth of field, cinematic lighting, comic panel grid, contact sheet, character sheet, multiple views, storyboard, low quality, blurry, text, letters, watermark, bad anatomy, extra fingers, deformed';
 
 // Workflow Qwen-image 2.1 como API (sem UI nodes). Fluxo:
 // [1] UnetLoaderGGUF → [2] LoraLoader (model+clip) → [3] KSampler
@@ -183,8 +195,11 @@ export async function gerarImagemSlide(prompt, seed = 42) {
   workflow['9'].inputs.height = IMAGEM_ALTURA;
   workflow['3'].inputs.steps = STEPS;
   workflow['3'].inputs.seed = seed;
-  // TextEncodeQwenImage21: prompt completo com estilo, negativo e resolução base
-  workflow['5'].inputs.prompt = `${prompt}, ${ESTILO_SUFIXO}, no text, no letters, no words, no captions, no speech bubbles`;
+  // Estilo PRIMEIRO (no fim de prompt longo o modelo ignora e renderiza 3D);
+  // depois a cena + personagens; blindagem anti-grade ("character sheet") e
+  // sufixo anti-texto por último. cfg=1.0 ignora o negativo, então as frases
+  // de veto precisam estar no positivo.
+  workflow['5'].inputs.prompt = `${ESTILO_SUFIXO}. Scene: ${prompt}, single continuous scene, no panel layout, no comic grid, no multiple views, no character sheet, no text, no letters, no words, no captions, no speech bubbles`;
   workflow['5'].inputs.negative_prompt = NEGATIVE_PROMPT;
   workflow['5'].inputs.resolution = resolucaoBase;
   const promptId = await submeterPrompt(workflow);
