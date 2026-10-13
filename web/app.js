@@ -120,12 +120,21 @@ function itemAtivoDoJob(s) {
   if (!s.job || s.job.status !== 'rodando' || !s.job.msg) return null;
   const msg = s.job.msg;
   let m = /imagem\s+(\d+)\/(\d+)/.exec(msg);
-  if (m) return { tipo: 'imagem', idx: Number(m[1]), pct: s.job.pct };
+  if (m) {
+    // "passo v/m" = progresso do sampler dentro da imagem atual (ComfyUI)
+    const mp = /passo\s+(\d+)\/(\d+)/.exec(msg);
+    const pct = mp ? Math.min(100, Math.round((Number(mp[1]) / Number(mp[2])) * 100)) : null;
+    return { tipo: 'imagem', idx: Number(m[1]), pct };
+  }
   m = /narra[çc][ãa]o\s+(\d+)\/(\d+)/.exec(msg);
   if (m) return { tipo: 'audio', idx: Number(m[1]), pct: s.job.pct };
   // regeneração de um item único (sem contador no log)
   if (s.job.etapa === 'narracao' && s.jobAlvo) return { tipo: 'audio', id: s.jobAlvo, pct: s.job.pct };
-  if (s.job.etapa === 'imagens' && s.jobAlvo) return { tipo: 'imagem', id: s.jobAlvo, pct: s.job.pct };
+  if (s.job.etapa === 'imagens' && s.jobAlvo) {
+    const mp = /passo\s+(\d+)\/(\d+)/.exec(msg);
+    const pct = mp ? Math.min(100, Math.round((Number(mp[1]) / Number(mp[2])) * 100)) : null;
+    return { tipo: 'imagem', id: s.jobAlvo, pct };
+  }
   return null;
 }
 
@@ -287,7 +296,7 @@ function conectarSSE() {
     }
     if ((msg.tipo === 'progress' || msg.tipo === 'log' || msg.tipo === 'ok') && state.job?.etapa === msg.etapa) {
       const job = { ...state.job, status: 'rodando', msg: msg.linha };
-      const m = /\((\d+)%\)$/.exec(msg.linha || '');
+      const m = /\((\d+(?:\.\d+)?)%\)$/.exec(msg.linha || '');
       if (m) job.pct = Number(m[1]);
       if (msg.etapa === 'imagens') {
         const mi = /imagem\s+(\d+)\/(\d+)/.exec(msg.linha || '');
@@ -578,7 +587,13 @@ function Bloco({ item, ativo }) {
                     />
                     <span className="thumb-zoom">🔍</span>
                     ${item.imagem.desatualizado ? html`<div className="sobreposto-desatualizado">prompt alterado</div>` : null}
-                    ${gerandoImagem ? html`<div className="overlay-regen">↻ regenerando…</div>` : null}
+                    ${gerandoImagem ? html`
+                      <div className="overlay-regen">
+                        <span>${ativo.pct != null ? `↻ regenerando… ${ativo.pct}%` : '↻ regenerando…'}</span>
+                        <div className=${`barra-progresso ${ativo.pct == null ? 'indeterminada' : ''}`}>
+                          <div style=${{ width: `${ativo.pct ?? 100}%` }}></div>
+                        </div>
+                      </div>` : null}
                   </div>`
                 : html`
                   <div className="thumb-wrap vazio ${gerandoImagem ? 'gerando' : ''}">
@@ -627,11 +642,12 @@ function abrirModalSlidePara(slideId) {
 }
 
 function ProgressoItem({ pct, rotulo }) {
-  const p = Math.max(4, Math.min(100, pct ?? 8));
+  const indeterminado = pct == null;
+  const p = indeterminado ? 100 : Math.max(4, Math.min(100, pct));
   return html`
     <div className="prog-item">
       <div className="prog-item-rotulo">${rotulo}</div>
-      <div className="barra-progresso"><div style=${{ width: `${p}%` }}></div></div>
+      <div className=${`barra-progresso ${indeterminado ? 'indeterminada' : ''}`}><div style=${{ width: `${p}%` }}></div></div>
     </div>`;
 }
 

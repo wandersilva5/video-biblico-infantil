@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 const COMFY_URL = process.env.COMFY_URL || 'http://127.0.0.1:8188';
 const COMFY_OUTPUT_DIR = process.env.COMFY_OUTPUT_DIR || 'D:\\ComfyUI_windows_portable\\ComfyUI\\output';
@@ -52,6 +53,95 @@ async function interromperComfyUI() {
   } catch {
     /* ignora */
   }
+}
+
+// ---------------------------------------------------------------------------
+// Progresso em tempo real do ComfyUI (websocket)
+// ---------------------------------------------------------------------------
+// O ComfyUI emite {"type":"progress","data":{value,max,prompt_id,node}} a cada
+// passo do sampler — mas SÓ para o socket cujo clientId veio no POST /prompt,
+// então a WS precisa usar o mesmo client_id. Sem isso a barra do navegador só
+// se moveria a cada imagem (~2 min de intervalo), o que parece travada.
+const WS_BASE = `${COMFY_URL.replace(/^http/i, 'ws')}/ws?clientId=`;
+
+function criarMonitorProgresso() {
+  const clientId = randomUUID();
+  const ouvintes = new Set();
+  let ws = null;
+  let aberto = false;
+  try {
+    ws = new WebSocket(WS_BASE + clientId);
+    ws.addEventListener('open', () => { aberto = true; });
+    ws.addEventListener('message', (ev) => {
+      if (typeof ev.data !== 'string') return; // previews são binários
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg?.type !== 'progress') return;
+      const d = msg.data || {};
+      if (!Number.isFinite(d.value) || !Number.isFinite(d.max) || d.max <= 0) return;
+      for (const fn of ouvintes) fn(d);
+    });
+    ws.addEventListener('error', () => { /* sem WS cai no fallback por tempo */ });
+  } catch {
+    ws = null;
+  }
+  return {
+    clientId,
+    async aguardarAbertura(ms = 2000) {
+      if (!ws) return false;
+      const t0 = Date.now();
+      while (!aberto && Date.now() - t0 < ms) await sleep(50);
+      return aberto;
+    },
+    aoProgresso(fn) { ouvintes.add(fn); },
+    fechar() {
+      ouvintes.clear();
+      try { ws?.close(); } catch { /* ignora */ }
+    },
+  };
+}
+
+// Imprime linhas de progresso para o servidor web (SSE). Retorna a função parar().
+// baseIdx/total = posição da imagem no conjunto geral (intro, slides, outro),
+// para o percentual global da barra. Entre um passo e outro do sampler estima o
+// avanço pelo tempo decorrido, então a barra anda continuamente.
+function acompanharComfyUI(monitor, { cabecalho, detalhe, baseIdx, total, inicio }) {
+  let anterior = null;
+  let atual = null;
+  let ultimoPct = null;
+  let ultimaAtualizacao = 0;
+
+  const pctDe = (frac) =>
+    Math.min(100, Math.max(0, Math.round(((baseIdx + frac) / total) * 1000) / 10));
+
+  monitor.aoProgresso((d) => {
+    anterior = atual;
+    atual = { value: d.value, max: d.max, t: Date.now() };
+    ultimaAtualizacao = atual.t;
+  });
+
+  console.error(`  [${cabecalho}] ${detalhe} · enviando ao ComfyUI (${pctDe(0)}%)`);
+
+  const tick = setInterval(() => {
+    if (!atual) return;
+    const dur = anterior ? Math.max(500, atual.t - anterior.t) : 1500;
+    const frac = Math.min(1, (atual.value + (Date.now() - atual.t) / dur) / atual.max);
+    const pct = pctDe(frac);
+    if (pct === ultimoPct) return;
+    ultimoPct = pct;
+    console.error(`  [${cabecalho}] ${detalhe} · passo ${atual.value}/${atual.max} (${pct}%)`);
+  }, 1500);
+
+  const hb = setInterval(() => {
+    if (Date.now() - ultimaAtualizacao < 6000) return;
+    const seg = Math.round((Date.now() - inicio) / 1000);
+    console.error(`  [${cabecalho}] ${detalhe} ... aguardando ComfyUI (${seg}s) (${pctDe(0)}%)`);
+  }, 15000);
+
+  return () => {
+    clearInterval(tick);
+    clearInterval(hb);
+  };
 }
 
 // Sufixo global de estilo — 2D de livro infantil (aguarela/gouache com textura de
@@ -134,11 +224,13 @@ const WORKFLOW_TEMPLATE = {
   "10": { class_type: "SaveImage", inputs: { images: ["9", 0], filename_prefix: "historinha_slide" } },
 };
 
-async function submeterPrompt(workflow) {
+async function submeterPrompt(workflow, clientId) {
+  const corpo = { prompt: workflow };
+  if (clientId) corpo.client_id = clientId;
   const resp = await fetch(`${COMFY_URL}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: workflow }),
+    body: JSON.stringify(corpo),
   });
   if (!resp.ok) {
     const err = await resp.text();
@@ -178,7 +270,7 @@ async function aguardarExecucao(promptId, timeoutMs = COMFY_TIMEOUT) {
   throw new Error('Timeout aguardando ComfyUI');
 }
 
-export async function gerarImagemSlide(prompt, seed = 42) {
+export async function gerarImagemSlide(prompt, seed = 42, monitor = null) {
   const workflow = structuredClone(WORKFLOW_TEMPLATE);
   // Resolução base (difusão) e final (upscale lanczos)
   const resolucaoBase = Math.max(LARGURA_BASE, ALTURA_BASE);
@@ -202,7 +294,7 @@ export async function gerarImagemSlide(prompt, seed = 42) {
   workflow['5'].inputs.prompt = `${ESTILO_SUFIXO}. Scene: ${prompt}, single continuous scene, no panel layout, no comic grid, no multiple views, no character sheet, no text, no letters, no words, no captions, no speech bubbles`;
   workflow['5'].inputs.negative_prompt = NEGATIVE_PROMPT;
   workflow['5'].inputs.resolution = resolucaoBase;
-  const promptId = await submeterPrompt(workflow);
+  const promptId = await submeterPrompt(workflow, monitor?.clientId);
   const files = await aguardarExecucao(promptId);
   const file = files[0];
   if (!file) throw new Error('ComfyUI não retornou arquivos');
@@ -212,11 +304,13 @@ export async function gerarImagemSlide(prompt, seed = 42) {
 export async function gerarImagensSlides(slides, outDir, roteiro) {
   const imagens = [];
   const falhas = [];
-  for (let i = 0; i < slides.length; i++) {
+  const n = slides.length;
+  const totalItens = n + 2; // intro + slides + conclusão
+  for (let i = 0; i < n; i++) {
     const slide = slides[i];
     const dest = join(outDir, `slide-${String(i + 1).padStart(2, '0')}.png`);
     if (existsSync(dest)) {
-      console.error(`  [imagem ${i + 1}/${slides.length}] ${slide.titulo} (já existe, pulando)`);
+      console.error(`  [imagem ${i + 1}/${n}] ${slide.titulo} (já existe, pulando)`);
       imagens.push({ id: slide.id, path: dest });
       continue;
     }
@@ -224,29 +318,36 @@ export async function gerarImagensSlides(slides, outDir, roteiro) {
     // manter o mesmo "desenho" entre os slides (personagens consistentes).
     // SEED_POR_SLIDE=1 volta ao comportamento antigo (uma seed por slide).
     const seed = SEED_POR_SLIDE ? SEED_BASE + i * 137 : SEED_BASE;
-    console.error(`  [imagem ${i + 1}/${slides.length}] ${slide.titulo} ...`);
     const inicioImg = Date.now();
-    const hb = setInterval(() => {
-      console.error(`  [imagem ${i + 1}/${slides.length}] ${slide.titulo} ... aguardando ComfyUI (${Math.round((Date.now() - inicioImg) / 1000)}s)`);
-    }, 15000);
     let feito = false;
     for (let t = 1; t <= ZIMAGE_TENTATIVAS && !feito; t++) {
+      const monitor = criarMonitorProgresso();
+      const parar = acompanharComfyUI(monitor, {
+        cabecalho: `imagem ${i + 1}/${n}`,
+        detalhe: slide.titulo,
+        baseIdx: i + 1,
+        total: totalItens,
+        inicio: inicioImg,
+      });
       try {
-        const src = await gerarImagemSlide(buildPromptImagem(slide, roteiro), seed);
+        await monitor.aguardarAbertura();
+        const src = await gerarImagemSlide(buildPromptImagem(slide, roteiro), seed, monitor);
         await copyFile(src, dest);
         imagens.push({ id: slide.id, path: dest });
         console.error(`  OK: ${dest}`);
         feito = true;
       } catch (e) {
-        console.error(`  [imagem ${i + 1}/${slides.length}] tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
+        console.error(`  [imagem ${i + 1}/${n}] tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
         await interromperComfyUI();
         if (t < ZIMAGE_TENTATIVAS) {
-          console.error(`  [imagem ${i + 1}/${slides.length}] aguardando 5s e tentando de novo ...`);
+          console.error(`  [imagem ${i + 1}/${n}] aguardando 5s e tentando de novo ...`);
           await sleep(5000);
         }
+      } finally {
+        parar();
+        monitor.fechar();
       }
     }
-    clearInterval(hb);
     if (!feito) falhas.push({ id: slide.id, titulo: slide.titulo });
   }
   if (falhas.length) {
@@ -259,34 +360,42 @@ export async function gerarImagensSlides(slides, outDir, roteiro) {
 // Gera UMA imagem de arte (abertura/encerramento) com o mesmo fluxo dos slides:
 // pula se já existe, tenta até ZIMAGE_TENTATIVAS, interrompe o ComfyUI antes de retry.
 // Falha aqui NÃO derruba a etapa — vira aviso (o montar_video tem fallback).
-async function gerarImagemArte(prompt, dest, seed, rotulo) {
+// pos/total = posição da arte no conjunto geral, para o percentual global.
+async function gerarImagemArte(prompt, dest, seed, rotulo, pos, total) {
   if (existsSync(dest)) {
-    console.error(`  [imagem] ${rotulo} (já existe, pulando)`);
+    console.error(`  [arte] ${rotulo} (já existe, pulando)`);
     return dest;
   }
-  console.error(`  [imagem] ${rotulo} ...`);
   const inicioImg = Date.now();
-  const hb = setInterval(() => {
-    console.error(`  [imagem] ${rotulo} ... aguardando ComfyUI (${Math.round((Date.now() - inicioImg) / 1000)}s)`);
-  }, 15000);
   let feito = false;
   for (let t = 1; t <= ZIMAGE_TENTATIVAS && !feito; t++) {
+    const monitor = criarMonitorProgresso();
+    const parar = acompanharComfyUI(monitor, {
+      cabecalho: `arte ${pos + 1}/${total}`,
+      detalhe: rotulo,
+      baseIdx: pos,
+      total,
+      inicio: inicioImg,
+    });
     try {
-      const src = await gerarImagemSlide(prompt, seed);
+      await monitor.aguardarAbertura();
+      const src = await gerarImagemSlide(prompt, seed, monitor);
       await copyFile(src, dest);
       console.error(`  OK: ${dest}`);
       feito = true;
     } catch (e) {
-      console.error(`  [imagem] ${rotulo} tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
+      console.error(`  [arte] ${rotulo} tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
       await interromperComfyUI();
       if (t < ZIMAGE_TENTATIVAS) {
-        console.error(`  [imagem] ${rotulo} aguardando 5s e tentando de novo ...`);
+        console.error(`  [arte] ${rotulo} aguardando 5s e tentando de novo ...`);
         await sleep(5000);
       }
+    } finally {
+      parar();
+      monitor.fechar();
     }
   }
-  clearInterval(hb);
-  if (!feito) console.error(`  [imagem] ATENÇÃO: não foi possível gerar ${rotulo} (usará fallback no vídeo)`);
+  if (!feito) console.error(`  [arte] ATENÇÃO: não foi possível gerar ${rotulo} (usará fallback no vídeo)`);
   return dest;
 }
 
@@ -298,12 +407,13 @@ async function main() {
   }
   const roteiro = JSON.parse(await readFile(roteiroPath, 'utf8'));
   const outDir = dirname(roteiroPath);
+  const totalItens = roteiro.slides.length + 2;
   console.error(`[2/4] Gerando ${roteiro.slides.length} imagens ...`);
   const imagens = await gerarImagensSlides(roteiro.slides, outDir, roteiro);
   console.error('  Gerando imagem de abertura (mulher com a Bíblia infantil) ...');
-  await gerarImagemArte(PROMPT_INTRO, join(outDir, '00-intro.png'), SEED_BASE + 900001, 'abertura');
+  await gerarImagemArte(PROMPT_INTRO, join(outDir, '00-intro.png'), SEED_BASE + 900001, 'abertura', 0, totalItens);
   console.error('  Gerando imagem de encerramento ...');
-  await gerarImagemArte(PROMPT_OUTRO, join(outDir, 'outro.png'), SEED_BASE + 900002, 'encerramento');
+  await gerarImagemArte(PROMPT_OUTRO, join(outDir, 'outro.png'), SEED_BASE + 900002, 'encerramento', totalItens - 1, totalItens);
   console.log(JSON.stringify(imagens));
 }
 

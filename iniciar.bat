@@ -18,7 +18,7 @@ rem  e o backend atualizados.
 rem =====================================================================
 
 set "LLAMA_EXE=E:\llama.cpp\llama-server.exe"
-set "LLAMA_MODEL=E:\llama.cpp\models\Qwen3.5-9B-Q4_K_M.gguf"
+set "LLAMA_MODEL=E:\llama.cpp\models\chat\Qwen3.5-9B-Q4_K_M.gguf"
 set "LLAMA_PORT=8091"
 set "COMFY_DIR=D:\ComfyUI_windows_portable"
 set "COMFY_BAT=%COMFY_DIR%\run_nvidia_gpu.bat"

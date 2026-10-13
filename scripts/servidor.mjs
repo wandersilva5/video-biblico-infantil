@@ -133,13 +133,20 @@ function runJob({ etapa, args, env = {} }) {
       for (const raw of d.toString().split(/\r?\n/)) {
         const l = raw.trim();
         if (!l) continue;
-        const m = /^(\d{1,3})%\s+(.*)$/.exec(l);
-        if (m) emit('progress', m[2].trim() + ` (${m[1]}%)`);
+        const m = /^(\d{1,3}(?:\.\d+)?)%\s+(.*)$/.exec(l);
+        if (m) emit('progress', `${m[2].trim()} (${m[1]}%)`);
         else {
           const pm = /^\[([^\]]+?)\s+(\d+)\/(\d+)\]\s*(.*)$/.exec(l);
           if (pm) {
-            const pct = Math.round((Number(pm[2]) / Number(pm[3])) * 100);
-            emit('progress', `${pm[1]} ${pm[2]}/${pm[3]}${pm[4] ? ' · ' + pm[4].trim() : ''} (${pct}%)`);
+            // Percentual EXPLÍCITO no fim da linha (progresso por passo do
+            // ComfyUI) tem prioridade sobre o cálculo grosseiro por índice.
+            const restoBruto = (pm[4] || '').trim();
+            const expl = /\((\d{1,3}(?:\.\d+)?)%\)\s*$/.exec(restoBruto);
+            const pct = expl
+              ? Number(expl[1])
+              : Math.round((Number(pm[2]) / Number(pm[3])) * 100);
+            const resto = restoBruto.replace(/\s*\(\d{1,3}(?:\.\d+)?%\)\s*$/, '').trim();
+            emit('progress', `${pm[1]} ${pm[2]}/${pm[3]}${resto ? ' · ' + resto : ''} (${pct}%)`);
           } else if (/erro/i.test(l)) emit('erro', l);
           else if (/OK:/.test(l)) emit('ok', l);
           else emit('log', l);
