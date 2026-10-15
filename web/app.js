@@ -86,10 +86,15 @@ function unificar(roteiro, artefatos) {
   const lista = [];
   const totalSlides = st.slides.length;
   const totalNarra = totalSlides + 2;
+  const arte = st.arte || {};
+  const imgDe = (a) => (a?.existe
+    ? { existe: true, desatualizado: !!a.desatualizado, mtime: a.mtime }
+    : { existe: false, desatualizado: false, mtime: null });
   lista.push({
     id: 'intro', tipo: 'abertura', rotulo: 'Abertura',
     titulo: r.titulo_aula, texto: r.introducao,
-    prefix: '00-intro', imagem: null, audio: st.intro,
+    prompt: r.introducao_imagem_prompt || '',
+    prefix: '00-intro', imagem: imgDe(arte.intro), arteSrc: '00-intro.png', audio: st.intro,
     narraIdx: 1, narraTotal: totalNarra,
   });
   st.slides.forEach((s) => {
@@ -97,6 +102,7 @@ function unificar(roteiro, artefatos) {
     lista.push({
       id: s.id, tipo: 'slide', rotulo: `Slide ${String(s.idx).padStart(2, '0')}`,
       idx: s.idx, titulo: s.titulo, texto: rs.narracao || '',
+      prompt: rs.imagem_prompt || '',
       prefix: String(s.idx).padStart(2, '0'),
       imagem: s.imagem.existe
         ? { existe: true, desatualizado: !!s.imagem.desatualizado, mtime: s.imagem.mtime }
@@ -108,8 +114,9 @@ function unificar(roteiro, artefatos) {
   lista.push({
     id: 'conclusao', tipo: 'conclusao', rotulo: 'Conclusão',
     titulo: '', texto: r.conclusao,
+    prompt: r.conclusao_imagem_prompt || '',
     prefix: `${String(totalNarra).padStart(2, '0')}-conclusao`,
-    imagem: null, audio: st.conclusao,
+    imagem: imgDe(arte.conclusao), arteSrc: 'outro.png', audio: st.conclusao,
     narraIdx: totalNarra, narraTotal: totalNarra,
   });
   return lista;
@@ -207,24 +214,31 @@ async function salvarRoteiro() {
     toast('Roteiro salvo.');
   } catch (e) { toast(e.message, true); }
 }
-// Salva o texto (e título) de UM bloco do roteiro — intro, slide ou conclusão.
-async function salvarTextoBloco(itemId, titulo, texto) {
+// Salva o texto (e título/prompt da imagem) de UM bloco do roteiro — intro, slide ou conclusão.
+async function salvarTextoBloco(itemId, titulo, texto, prompt) {
   const r = state.roteiro;
   if (!r) return;
   const novo = { ...r };
   if (itemId === 'intro') {
     novo.titulo_aula = titulo || r.titulo_aula;
     novo.introducao = texto;
+    if (typeof prompt === 'string') novo.introducao_imagem_prompt = prompt;
   } else if (itemId === 'conclusao') {
     novo.conclusao = texto;
+    if (typeof prompt === 'string') novo.conclusao_imagem_prompt = prompt;
   } else {
-    novo.slides = r.slides.map((sl) => (sl.id === itemId ? { ...sl, titulo, narracao: texto } : sl));
+    novo.slides = r.slides.map((sl) => {
+      if (sl.id !== itemId) return sl;
+      const atualizado = { ...sl, titulo, narracao: texto };
+      if (typeof prompt === 'string') atualizado.imagem_prompt = prompt;
+      return atualizado;
+    });
   }
   try {
     await api(`/api/roteiro/${state.slug}`, { method: 'PUT', body: JSON.stringify(novo) });
     setState({ roteiro: novo });
     await recarregarArtefatos();
-    toast('Texto salvo. Áudios com texto alterado ficam marcados para regenerar.');
+    toast('Salvo no roteiro. Conteúdo alterado fica marcado para regenerar (áudio/imagem).');
   } catch (e) { toast(e.message, true); }
 }
 async function regenerarRoteiro() {
@@ -300,7 +314,10 @@ function conectarSSE() {
       if (m) job.pct = Number(m[1]);
       if (msg.etapa === 'imagens') {
         const mi = /imagem\s+(\d+)\/(\d+)/.exec(msg.linha || '');
-        if (mi && job.inicioMs) {
+        // jobAlvo = geração de UM item só: o contador X/Y é o global do roteiro
+        // (serve p/ destacar o bloco), então o ETA calculado a partir dele seria
+        // errado — nesse caso não mostra tempo restante.
+        if (mi && job.inicioMs && !state.jobAlvo) {
           const atual = Number(mi[1]);
           const total = Number(mi[2]);
           const porImg = (Date.now() - job.inicioMs) / 1000 / Math.max(1, atual);
@@ -503,19 +520,27 @@ function montarVideo() {
 function Bloco({ item, ativo }) {
   const s = useAppState();
   const isSlide = item.tipo === 'slide';
-  const gerandoImagem = isSlide && ativo?.tipo === 'imagem' && (ativo.idx === item.idx || ativo.id === item.id);
+  const isArte = item.tipo === 'abertura' || item.tipo === 'conclusao';
+  const temArte = isSlide || isArte; // blocos com imagem (slide, abertura, conclusão)
+  const gerandoImagem = temArte && ativo?.tipo === 'imagem' && (ativo.idx === item.idx || ativo.id === item.id);
   const gerandoAudio = ativo?.tipo === 'audio' && (ativo.idx === item.narraIdx || ativo.id === item.id);
   const temImagem = item.imagem?.existe;
   const temAudio = item.audio?.existe;
 
-  // rascunho editável do texto/título (salva por bloco)
+  // rascunho editável do texto/título/prompt da imagem (salva por bloco)
   const [tituloDraft, setTituloDraft] = useState(item.titulo || '');
   const [textoDraft, setTextoDraft] = useState(item.texto || '');
+  const [promptDraft, setPromptDraft] = useState(item.prompt || '');
   useEffect(() => {
     setTituloDraft(item.titulo || '');
     setTextoDraft(item.texto || '');
-  }, [item.texto, item.titulo]);
+    setPromptDraft(item.prompt || '');
+  }, [item.texto, item.titulo, item.prompt]);
   const sujo = textoDraft !== (item.texto || '') || (isSlide && tituloDraft !== (item.titulo || ''));
+  const sujoPrompt = temArte && promptDraft !== (item.prompt || '');
+  const sujoGeral = sujo || sujoPrompt;
+  const rotuloSujo = sujo && sujoPrompt ? 'texto/prompt alterado — salve'
+    : sujoPrompt ? 'prompt alterado — salve' : 'texto alterado — salve';
   const palavras = (textoDraft.trim().match(/\S+/g) || []).length;
 
   const regenImagem = () => rodarJob(
@@ -524,6 +549,9 @@ function Bloco({ item, ativo }) {
   const gerarImagem = () => rodarJob(
     api(`/api/imagens/${s.slug}`, { method: 'POST', body: JSON.stringify({ slideId: item.id }) }),
     'Imagem gerada.', item.id);
+  const srcImagem = isArte
+    ? `/media/${s.slug}/${item.arteSrc}?v=${item.imagem.mtime ?? 0}`
+    : `/media/${s.slug}/slide-${String(item.idx).padStart(2, '0')}.png?v=${item.imagem.mtime ?? item.idx}`;
   const delImagem = () => {
     if (confirm(`Excluir a imagem do slide ${item.id}?`)) {
       rodarJob(api(`/api/imagens/${s.slug}`, { method: 'DELETE', body: JSON.stringify({ slideId: item.id }) }), 'Imagem excluída.', item.id);
@@ -542,9 +570,9 @@ function Bloco({ item, ativo }) {
     <div className="bloco" data-id=${item.id}>
       <div className="bloco-cab">
         <span className="bloco-tipo">${item.rotulo}</span>
-        ${sujo ? html`<span className="badge alerta pulse">texto alterado — salve</span>` : null}
+        ${sujoGeral ? html`<span className="badge alerta pulse">${rotuloSujo}</span>` : null}
       </div>
-      <div className=${`bloco-grid ${isSlide ? '' : 'sem-img'}`}>
+      <div className=${`bloco-grid ${temArte ? '' : 'sem-img'}`}>
         <div className="bloco-col bloco-col-texto">
           ${item.tipo !== 'conclusao'
             ? html`<input
@@ -564,24 +592,44 @@ function Bloco({ item, ativo }) {
             disabled=${s.jobAtivo}
             onInput=${(e) => setTextoDraft(e.target.value)}
           ></textarea>
+          ${temArte
+            ? html`
+              <div className="prompt-editor">
+                <div className="prompt-cab">
+                  <span>✍ Prompt da imagem (inglês)</span>
+                  ${sujoPrompt ? html`<span className="badge alerta pulse">não salvo</span>` : null}
+                </div>
+                <textarea
+                  className="edit-texto edit-prompt"
+                  rows="4"
+                  placeholder="Who is in the scene, what happens, where... (ex.: Noah feeding a lamb on the ark deck, two giraffes watching)"
+                  value=${promptDraft}
+                  disabled=${s.jobAtivo}
+                  onInput=${(e) => setPromptDraft(e.target.value)}
+                ></textarea>
+                <span className="prompt-ajuda">${isArte
+                  ? 'Cena da arte de abertura/encerramento (professora com a Bíblia infantil / despedida). Estilo Pixar 3D e personagens fixos entram automaticamente. Ao salvar, a arte fica marcada “prompt alterado”; use ↻ refazer.'
+                  : 'Descreva UMA cena com os personagens certos (evite repetir quem já apareceu). Estilo Pixar 3D e a lista fixa de personagens entram automaticamente na geração — não escreva estilo aqui. Ao salvar, a imagem fica marcada “prompt alterado”; use ↻ refazer para gerar de novo.'}</span>
+              </div>`
+            : null}
           <div className="edit-rodape">
             <span className=${`contador ${palavras >= 20 && palavras <= 45 ? 'dentro' : 'fora'}`}>${palavras} palavras</span>
             <button
               className="btn btn-mini btn-primario"
-              disabled=${!sujo || s.jobAtivo}
-              title="Salvar este texto no roteiro"
-              onClick=${() => salvarTextoBloco(item.id, tituloDraft, textoDraft)}
-            >💾 Salvar texto</button>
+              disabled=${!sujoGeral || s.jobAtivo}
+              title="Salvar texto, título e prompt da imagem deste bloco no roteiro"
+              onClick=${() => salvarTextoBloco(item.id, tituloDraft, textoDraft, promptDraft)}
+            >💾 Salvar</button>
           </div>
         </div>
-        ${isSlide
+        ${temArte
           ? html`
             <div className="bloco-col bloco-col-img">
               ${temImagem
                 ? html`
-                  <div className="thumb-wrap" title="Clique para ver em tela cheia" onClick=${() => abrirModalSlidePara(item.id)}>
+                  <div className="thumb-wrap" title=${isSlide ? 'Clique para ver em tela cheia' : ''} onClick=${() => { if (isSlide) abrirModalSlidePara(item.id); }}>
                     <img
-                      src=${`/media/${s.slug}/slide-${String(item.idx).padStart(2, '0')}.png?v=${item.imagem.mtime ?? item.idx}`}
+                      src=${srcImagem}
                       alt=${item.titulo}
                       loading="lazy"
                     />
@@ -789,12 +837,14 @@ const CAMPOS_CONFIG = [
   ['LLAMA_URL', 'LLAMA_URL'],
   ['COMFY_URL', 'COMFY_URL'],
   ['COMFY_OUTPUT_DIR', 'COMFY_OUTPUT_DIR'],
-  ['ZIMAGE_UNET', 'ZIMAGE_UNET'],
-  ['ZIMAGE_CLIP', 'ZIMAGE_CLIP'],
-  ['ZIMAGE_VAE', 'ZIMAGE_VAE'],
-  ['ZIMAGE_LORA', 'ZIMAGE_LORA'],
-  ['ZIMAGE_STEPS', 'ZIMAGE_STEPS'],
-  ['ZIMAGE_LORA_STRENGTH', 'ZIMAGE_LORA_STRENGTH'],
+  ['KREA2_UNET', 'KREA2_UNET'],
+  ['KREA2_CLIP', 'KREA2_CLIP'],
+  ['KREA2_CLIP_DEVICE', 'KREA2_CLIP_DEVICE'],
+  ['KREA2_VAE', 'KREA2_VAE'],
+  ['KREA2_LORA', 'KREA2_LORA'],
+  ['KREA2_LORA_FORCA', 'KREA2_LORA_FORCA'],
+  ['KREA2_STEPS', 'KREA2_STEPS'],
+  ['KREA2_TRIGGER', 'KREA2_TRIGGER'],
 ];
 function ModalConfig() {
   const s = useAppState();
@@ -821,12 +871,6 @@ function ModalConfig() {
           <label key=${k}>${label}
             <input type="text" value=${form[k] ?? ''} onInput=${(e) => set(k, e.target.value)} />
           </label>`)}
-        <label>CLIP na RAM ou GPU (QWEN_CLIP_DEVICE)
-          <select value=${form.QWEN_CLIP_DEVICE || 'cpu'} onChange=${(e) => set('QWEN_CLIP_DEVICE', e.target.value)}>
-            <option value="cpu">cpu (RAM — recomendado em 8GB de VRAM)</option>
-            <option value="default">default (GPU)</option>
-          </select>
-        </label>
         <label>MIN_SLIDES (cenas por história)
           <input type="number" min="4" max="30" value=${form.MIN_SLIDES ?? ''} onInput=${(e) => set('MIN_SLIDES', e.target.value)} />
         </label>

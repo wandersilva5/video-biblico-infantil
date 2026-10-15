@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile, copyFile } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, copyFile, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -7,20 +7,27 @@ import { randomUUID } from 'node:crypto';
 const COMFY_URL = process.env.COMFY_URL || 'http://127.0.0.1:8188';
 const COMFY_OUTPUT_DIR = process.env.COMFY_OUTPUT_DIR || 'D:\\ComfyUI_windows_portable\\ComfyUI\\output';
 
-// Qwen-image 2.1 (GGUF) — modelo principal de geração de imagem.
-// O text encoder oficial (qwen3vl_8b_int8_convrot, ~8.9GB) NÃO cabe junto com o
-// UNET (5.1GB) na VRAM de 8GB da RTX 3060 Ti: carregar os dois na GPU derruba o
-// ComfyUI. Por isso o CLIP roda na CPU por padrão (QWEN_CLIP_DEVICE=cpu) — o
-// encode é uma vez por imagem e o custo é pequeno. Use 'default' só se tiver
-// VRAM de sobra.
-const QWEN_UNET = process.env.ZIMAGE_UNET || 'qwen\\qwen-image-2.1-Q5_K_M.gguf';
-const QWEN_CLIP = process.env.ZIMAGE_CLIP || 'qwen3vl_8b_int8_convrot.safetensors';
-const QWEN_CLIP_DEVICE = process.env.QWEN_CLIP_DEVICE || 'cpu';
-const QWEN_VAE = process.env.ZIMAGE_VAE || 'qwen_image_2.1_vae_bf16.safetensors';
-// LoRA de velocidade: 8 passos para o Qwen-image 2.1. ZIMAGE_LORA_STRENGTH=0 desliga.
-const LORA_NAME = process.env.ZIMAGE_LORA || 'qwen\\p_qwen_image_2.1_8step_v0.1.safetensors';
-const STEPS = Number(process.env.ZIMAGE_STEPS) || 8;
-const LORA_STRENGTH = Number(process.env.ZIMAGE_LORA_STRENGTH) !== 0 ? (Number(process.env.ZIMAGE_LORA_STRENGTH) || 1.0) : 0;
+// Krea 2 Turbo (fp8) — modelo principal de geração de imagem (vencedor do teste
+// A/B contra Z-Image + DisneyIZT: mais fidelidade Disney/Pixar, prompts
+// respeitados, sem moldura preta). Receita do blueprint oficial
+// "Text to Image (Krea-2 Turbo)": UNETLoader fp8 + CLIPLoader tipo krea2
+// (qwen3vl_4b) + VAE qwen_image_vae + KSampler 8 passos euler/simple cfg 1.0.
+// LoRA "Pure-Pixar 3D | KREA 2 |" (trigger KR2Pix) fixa o estilo — cfg=1.0
+// ignora negative, então estilo e blindagens vivem no positivo. Em 8GB de VRAM
+// o ComfyUI faz offload automático do UNET (12.5GB fp8) e do TE (4B fp8).
+const KREA2_UNET = process.env.KREA2_UNET || 'Krea2\\krea2_turbo_fp8_scaled.safetensors';
+const KREA2_CLIP = process.env.KREA2_CLIP || 'qwen\\qwen3vl_4b_fp8_scaled.safetensors';
+const KREA2_CLIP_DEVICE = process.env.KREA2_CLIP_DEVICE || 'default';
+const KREA2_VAE = process.env.KREA2_VAE || 'qwen_image_vae.safetensors';
+// LoRA de estilo Pixar 3D. KREA2_LORA_FORCA=0 desliga.
+const LORA_NAME = process.env.KREA2_LORA || 'Krea2\\purePixarStyle3D_v1.safetensors';
+const STEPS = Number(process.env.KREA2_STEPS) || 8;
+const LORA_STRENGTH =
+  process.env.KREA2_LORA_FORCA !== undefined && process.env.KREA2_LORA_FORCA !== ''
+    ? Number(process.env.KREA2_LORA_FORCA)
+    : 1.0;
+// Trigger do LoRA no início do prompt. KREA2_TRIGGER='' desliga.
+const TRIGGER = process.env.KREA2_TRIGGER ?? 'KR2Pix';
 const SEED_BASE = process.env.KREA2_SEED_BASE !== undefined && process.env.KREA2_SEED_BASE !== '' ? Number(process.env.KREA2_SEED_BASE) : 1000;
 // Seed POR SLIDE (variedade de composição) é o padrão — a mesma seed em todas as
 // cenas faz o modelo repetir quase a mesma imagem. SEED_POR_SLIDE=0 força seed
@@ -34,16 +41,16 @@ const IMAGEM_LARGURA = Number(process.env.IMAGEM_LARGURA) || (FORMATO === '9:16'
 const IMAGEM_ALTURA = Number(process.env.IMAGEM_ALTURA) || (FORMATO === '9:16' ? 1152 : 640);
 
 // Qualidade: por padrão gera DIRETO na resolução final (1152x640 / 640x1152 —
-// múltiplos de 32), preservando muito mais detalhe no Qwen-image 2.1. O caminho
-// rápido em 2 passos (difusão em ~metade + upscale lanczos) fica opt-in com
-// ZIMAGE_UPSCALE=1 (combinável com ZIMAGE_ESCALA_BASE, default 0.5).
-const ZIMAGE_UPSCALE = process.env.ZIMAGE_UPSCALE === '1';
-const ESCALA_BASE = Math.min(1, Math.max(0.25, Number(process.env.ZIMAGE_ESCALA_BASE) || 0.5));
-const LARGURA_BASE = ZIMAGE_UPSCALE ? Math.round(IMAGEM_LARGURA * ESCALA_BASE / 16) * 16 : IMAGEM_LARGURA;
-const ALTURA_BASE = ZIMAGE_UPSCALE ? Math.round(IMAGEM_ALTURA * ESCALA_BASE / 16) * 16 : IMAGEM_ALTURA;
+// múltiplos de 32), preservando muito mais detalhe no Krea 2. O caminho rápido
+// em 2 passos (difusão em ~metade + upscale lanczos) fica opt-in com
+// KREA2_UPSCALE=1 (combinável com KREA2_ESCALA_BASE, default 0.5).
+const KREA2_UPSCALE = process.env.KREA2_UPSCALE === '1';
+const ESCALA_BASE = Math.min(1, Math.max(0.25, Number(process.env.KREA2_ESCALA_BASE) || 0.5));
+const LARGURA_BASE = KREA2_UPSCALE ? Math.round(IMAGEM_LARGURA * ESCALA_BASE / 16) * 16 : IMAGEM_LARGURA;
+const ALTURA_BASE = KREA2_UPSCALE ? Math.round(IMAGEM_ALTURA * ESCALA_BASE / 16) * 16 : IMAGEM_ALTURA;
 
 // Retry por imagem antes de desistir (uma imagem lenta/falha não derruba as demais).
-const ZIMAGE_TENTATIVAS = Number(process.env.ZIMAGE_TENTATIVAS) || 3;
+const TENTATIVAS = Number(process.env.KREA2_TENTATIVAS) || 3;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -144,29 +151,38 @@ function acompanharComfyUI(monitor, { cabecalho, detalhe, baseIdx, total, inicio
   };
 }
 
-// Sufixo global de estilo — 2D de livro infantil (aguarela/gouache com textura de
-// papel). Importante: o estilo entra NO INÍCIO do prompt final (ver
-// gerarImagemSlide) — no fim de um prompt longo o modelo o ignora e renderiza 3D.
-// ESTILO_SUFIXO env sobrescreve completamente.
+// Sufixo global de estilo — Disney/Pixar 3D (testado no A/B: LoRA purePixarStyle3D
+// + Krea 2 Turbo). O estilo entra NO INÍCIO do prompt final (ver
+// gerarImagemSlide), logo após o trigger do LoRA — no fim de um prompt longo o
+// modelo o ignora. ESTILO_SUFIXO env sobrescreve completamente.
 const ESTILO_SUFIXO =
   process.env.ESTILO_SUFIXO ||
-  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes and paper texture, hand-drawn storybook art, soft warm pastel palette, simple flat shading, charming naive children's book style, absolutely not 3D not CGI not photorealistic";
+  "children's animated film still in Disney-Pixar 3D animation style, soft rounded character design, big expressive eyes, warm vibrant colors, cinematic lighting, detailed stylized 3D render, family-friendly animated movie look";
 
 // Prompts das artes de abertura (00-intro.png) e encerramento (outro.png).
 // SEMPRE uma professora ensinando para crianças — mas composições DIFERENTES
 // (intro: círculo de leitura; outro: aula encerrando, todo mundo acenando).
+// O estilo global é pré-apendado automaticamente pelo gerarImagemSlide.
 const PROMPT_INTRO =
   process.env.PROMPT_INTRO ||
-  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes, hand-drawn storybook art, soft warm pastel palette: a kind young woman teacher sitting in a cozy reading corner holding an open storybook, teaching a small group of happy children sitting cross-legged on a colorful rug, children listening with curious bright eyes, warm and welcoming scene";
+  "a kind young woman teacher sitting in a cozy reading corner holding an open storybook, teaching a small group of happy children sitting cross-legged on a colorful rug, children listening with curious bright eyes, warm and welcoming scene";
 const PROMPT_OUTRO =
   process.env.PROMPT_OUTRO ||
-  "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes, hand-drawn storybook art, soft warm pastel palette: a kind young woman teacher standing beside a small chalkboard waving goodbye with a warm smile, a small group of happy children waving back and cheering with hands raised, joyful end-of-lesson scene with little stars and hearts floating";
+  "a kind young woman teacher standing beside a small chalkboard waving goodbye with a warm smile, a small group of happy children waving back and cheering with hands raised, joyful end-of-lesson scene with little stars and hearts floating";
+
+// Prompt de uma arte de abertura/encerramento: vem do roteiro (introducao_imagem_prompt
+// / conclusao_imagem_prompt). NÃO recebe o elenco bíblico (roteiro.personagens) —
+// as artes mostram a professora com as crianças, e prependar o cast da história
+// fazia o modelo desenhar Noé/Moisés/faraó junto da professora.
+// Só cai nos PROMPT_INTRO/PROMPT_OUTRO fixos se o roteiro for antigo (sem o campo).
+export function buildPromptArte(cenaBruta, fallback) {
+  return limparCenaDoPrompt(cenaBruta) || fallback;
+}
 
 // Remove do imagem_prompt do roteiro o prefixo de estilo antigo (chibi/kawaii),
-// o sufixo "no text...", frases 3D embutidas ("3D animation style" etc. — o
-// estilo global agora é 2D e não pode competir) e o sufixo "no text...",
-// deixando apenas a DESCRIÇÃO DA CENA. O estilo global e o sufixo anti-texto
-// são apensados automaticamente no prompt final.
+// frases 3D embutidas ("3D animation style" etc. — o estilo global governa) e o
+// sufixo "no text...", deixando apenas a DESCRIÇÃO DA CENA. O estilo global e o
+// sufixo anti-texto são apensados automaticamente no prompt final.
 function limparCenaDoPrompt(bruto) {
   if (!bruto) return '';
   return bruto
@@ -182,46 +198,49 @@ function limparCenaDoPrompt(bruto) {
 // Âncora de consistência: o roteiro descreve os personagens UMA vez
 // (roteiro.personagens) e essa descrição entra no início de TODOS os prompts,
 // para que o mesmo personagem apareça com a mesma aparência em todas as cenas.
+// Single-image-safe: a âncora antiga ("identical characters, same faces ... in
+// every scene") pedia VÁRIOS personagens idênticos — dentro de UMA imagem o
+// modelo desenhava clones do mesmo personagem na mesma cena.
 const PERSONAGENS_ANCORA =
-  'identical characters, same faces, same hairstyles, same outfits, same character designs in every scene';
+  'each character appears exactly once, consistent character design, no duplicate characters, no clones, no copies of the same character';
 
-// Prompt da imagem: descreve a CENA da história (estilo 2D de livro infantil),
-// a partir do imagem_prompt do roteiro. Fallback: título + narração quando não
-// houver descrição.
+// Prompt da imagem: descreve a CENA da história (estilo Disney/Pixar 3D é
+// aplicado depois, via trigger + ESTILO_SUFIXO), a partir do imagem_prompt do
+// roteiro. Fallback: título + narração quando não houver descrição.
+// O bloco Characters declara a aparência UMA vez e a cena cita os personagens
+// APENAS pelo nome (regra do gerar_roteiro) — descrever a mesma pessoa com
+// palavras diferentes em dois blocos fazia o modelo desenhar um clone na cena.
 export function buildPromptImagem(slide, roteiro) {
   const cena = limparCenaDoPrompt(slide.imagem_prompt);
   const personagens = limparCenaDoPrompt(slide.personagens || roteiro?.personagens || '');
   if (!personagens) return cena || `children's storybook scene of ${slide.titulo}. ${slide.narracao}`.slice(0, 300);
-  const partes = [`Characters: ${personagens}`, cena || `scene: ${slide.titulo}. ${slide.narracao}`];
+  const partes = [`Characters in this scene — the ONLY people in the image, each appearing exactly once (the scene below refers to these same individuals, not additional copies): ${personagens}`, cena || `scene: ${slide.titulo}. ${slide.narracao}`];
   partes.push(PERSONAGENS_ANCORA);
   return partes.filter(Boolean).join('; ');
 }
 
-// Workflow Qwen-image 2.1 (GGUF):
-// UnetLoaderGGUF (GGUF quantizado) + CLIPLoader tipo qwen_image + LoraLoader
-// + TextEncodeQwenImage21 (node específico com negative embutido) + KSampler 8 passos.
-// O TextEncodeQwenImage21 aceita prompt, negative_prompt e resolution num único node;
-// retorna positive + negative condicionings e latent opcional (não usado aqui).
-const NEGATIVE_PROMPT =
-  '3D render, 3D animation, CGI, Pixar style, dreamworks, photorealistic, photograph, octane render, unreal engine, glossy plastic skin, depth of field, cinematic lighting, comic panel grid, contact sheet, character sheet, multiple views, storyboard, low quality, blurry, text, letters, watermark, bad anatomy, extra fingers, deformed';
-
-// Workflow Qwen-image 2.1 como API (sem UI nodes). Fluxo:
-// [1] UnetLoaderGGUF → [2] LoraLoader (model+clip) → [3] KSampler
-// [4] CLIPLoader → [2]
-// [5] TextEncodeQwenImage21 → positive/negative em [3]
-// [6] EmptyLatentImage → [3]
-// [7] VAELoader → [8] VAEDecode → [9] ImageScale → [10] SaveImage
+// Workflow Krea 2 Turbo como API (blueprint oficial "Text to Image (Krea-2 Turbo)").
+// Fluxo: [1] UNETLoader → [4] LoraLoader → [8] KSampler
+// [2] CLIPLoader tipo krea2 → [4]
+// [3] VAELoader (qwen_image_vae) → [9]
+// [5] CLIPTextEncode (positivo) → [6] ConditioningZeroOut (negativo zerado:
+//     cfg=1.0 ignora o negative, então estilo e blindagens estão no positivo)
+// [7] EmptyLatentImage → [8]
+// [8] KSampler euler/simple → [9] VAEDecode → [10] ImageScale → [11] SaveImage
+// ATENÇÃO: o VAE do Krea 2 é qwen_image_vae — NÃO ae.safetensors (FLUX), que
+// decodifica os latents do Krea2 como ruído cinzento.
 const WORKFLOW_TEMPLATE = {
-  "1": { class_type: "UnetLoaderGGUF", inputs: { unet_name: "__UNET__" } },
-  "4": { class_type: "CLIPLoader", inputs: { clip_name: "__CLIP__", type: "qwen_image", device: "__CLIP_DEVICE__" } },
-  "2": { class_type: "LoraLoader", inputs: { model: ["1", 0], clip: ["4", 0], lora_name: "__LORA__", strength_model: "__LORA_STRENGTH__", strength_clip: "__LORA_STRENGTH__" } },
-  "5": { class_type: "TextEncodeQwenImage21", inputs: { clip: ["2", 1], vae: ["7", 0], prompt: "__POSITIVE__", negative_prompt: "__NEGATIVE__", resolution: "__RESOLUCAO__" } },
-  "6": { class_type: "EmptyLatentImage", inputs: { width: "__LARGURA_BASE__", height: "__ALTURA_BASE__", batch_size: 1 } },
-  "3": { class_type: "KSampler", inputs: { model: ["2", 0], positive: ["5", 0], negative: ["5", 1], latent_image: ["6", 0], seed: "__SEED__", steps: "__STEPS__", cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0 } },
-  "7": { class_type: "VAELoader", inputs: { vae_name: "__VAE__" } },
-  "8": { class_type: "VAEDecode", inputs: { samples: ["3", 0], vae: ["7", 0] } },
-  "9": { class_type: "ImageScale", inputs: { image: ["8", 0], upscale_method: "lanczos", width: "__LARGURA__", height: "__ALTURA__", crop: "disabled" } },
-  "10": { class_type: "SaveImage", inputs: { images: ["9", 0], filename_prefix: "historinha_slide" } },
+  "1": { class_type: "UNETLoader", inputs: { unet_name: "__UNET__", weight_dtype: "default" } },
+  "2": { class_type: "CLIPLoader", inputs: { clip_name: "__CLIP__", type: "krea2", device: "__CLIP_DEVICE__" } },
+  "3": { class_type: "VAELoader", inputs: { vae_name: "__VAE__" } },
+  "4": { class_type: "LoraLoader", inputs: { model: ["1", 0], clip: ["2", 0], lora_name: "__LORA__", strength_model: "__LORA_STRENGTH__", strength_clip: "__LORA_STRENGTH__" } },
+  "5": { class_type: "CLIPTextEncode", inputs: { clip: ["4", 1], text: "__POSITIVE__" } },
+  "6": { class_type: "ConditioningZeroOut", inputs: { conditioning: ["5", 0] } },
+  "7": { class_type: "EmptyLatentImage", inputs: { width: "__LARGURA_BASE__", height: "__ALTURA_BASE__", batch_size: 1 } },
+  "8": { class_type: "KSampler", inputs: { model: ["4", 0], positive: ["5", 0], negative: ["6", 0], latent_image: ["7", 0], seed: "__SEED__", steps: "__STEPS__", cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0 } },
+  "9": { class_type: "VAEDecode", inputs: { samples: ["8", 0], vae: ["3", 0] } },
+  "10": { class_type: "ImageScale", inputs: { image: ["9", 0], upscale_method: "lanczos", width: "__LARGURA__", height: "__ALTURA__", crop: "disabled" } },
+  "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "historinha_slide" } },
 };
 
 async function submeterPrompt(workflow, clientId) {
@@ -239,8 +258,8 @@ async function submeterPrompt(workflow, clientId) {
   return (await resp.json()).prompt_id;
 }
 
-// Tempo máximo de espera por imagem. O Qwen-image 2.1 (GGUF) pode levar alguns
-// minutos por imagem em placas de 8GB, então o default é generoso (COMFY_TIMEOUT).
+// Tempo máximo de espera por imagem. O Krea 2 Turbo (fp8, com offload em 8GB
+// de VRAM) leva ~1–2 min por imagem, então o default é generoso (COMFY_TIMEOUT).
 const COMFY_TIMEOUT = Number(process.env.COMFY_TIMEOUT) || 900000;
 
 async function aguardarExecucao(promptId, timeoutMs = COMFY_TIMEOUT) {
@@ -273,27 +292,25 @@ async function aguardarExecucao(promptId, timeoutMs = COMFY_TIMEOUT) {
 export async function gerarImagemSlide(prompt, seed = 42, monitor = null) {
   const workflow = structuredClone(WORKFLOW_TEMPLATE);
   // Resolução base (difusão) e final (upscale lanczos)
-  const resolucaoBase = Math.max(LARGURA_BASE, ALTURA_BASE);
-  workflow['1'].inputs.unet_name = QWEN_UNET;
-  workflow['4'].inputs.clip_name = QWEN_CLIP;
-  workflow['4'].inputs.device = QWEN_CLIP_DEVICE;
-  workflow['2'].inputs.lora_name = LORA_NAME;
-  workflow['2'].inputs.strength_model = LORA_STRENGTH;
-  workflow['2'].inputs.strength_clip = LORA_STRENGTH;
-  workflow['7'].inputs.vae_name = QWEN_VAE;
-  workflow['6'].inputs.width = LARGURA_BASE;
-  workflow['6'].inputs.height = ALTURA_BASE;
-  workflow['9'].inputs.width = IMAGEM_LARGURA;
-  workflow['9'].inputs.height = IMAGEM_ALTURA;
-  workflow['3'].inputs.steps = STEPS;
-  workflow['3'].inputs.seed = seed;
-  // Estilo PRIMEIRO (no fim de prompt longo o modelo ignora e renderiza 3D);
-  // depois a cena + personagens; blindagem anti-grade ("character sheet") e
-  // sufixo anti-texto por último. cfg=1.0 ignora o negativo, então as frases
-  // de veto precisam estar no positivo.
-  workflow['5'].inputs.prompt = `${ESTILO_SUFIXO}. Scene: ${prompt}, single continuous scene, no panel layout, no comic grid, no multiple views, no character sheet, no text, no letters, no words, no captions, no speech bubbles`;
-  workflow['5'].inputs.negative_prompt = NEGATIVE_PROMPT;
-  workflow['5'].inputs.resolution = resolucaoBase;
+  workflow['1'].inputs.unet_name = KREA2_UNET;
+  workflow['2'].inputs.clip_name = KREA2_CLIP;
+  workflow['2'].inputs.device = KREA2_CLIP_DEVICE;
+  workflow['3'].inputs.vae_name = KREA2_VAE;
+  workflow['4'].inputs.lora_name = LORA_NAME;
+  workflow['4'].inputs.strength_model = LORA_STRENGTH;
+  workflow['4'].inputs.strength_clip = LORA_STRENGTH;
+  workflow['7'].inputs.width = LARGURA_BASE;
+  workflow['7'].inputs.height = ALTURA_BASE;
+  workflow['10'].inputs.width = IMAGEM_LARGURA;
+  workflow['10'].inputs.height = IMAGEM_ALTURA;
+  workflow['8'].inputs.steps = STEPS;
+  workflow['8'].inputs.seed = seed;
+  // Trigger do LoRA + estilo PRIMEIRO (no fim de prompt longo o modelo ignora);
+  // depois a cena + personagens; blindagem anti-grade ("character sheet"),
+  // anti-duplicação (cfg=1.0 zera o negativo, então os vetos são todos positivos)
+  // e sufixo anti-texto por último.
+  const prefixo = TRIGGER ? `${TRIGGER}, ` : '';
+  workflow['5'].inputs.text = `${prefixo}${ESTILO_SUFIXO}. Scene: ${prompt}, single continuous scene, no panel layout, no comic grid, no multiple views, no character sheet, no duplicate characters, no clones, no copies of the same character, no text, no letters, no words, no captions, no speech bubbles`;
   const promptId = await submeterPrompt(workflow, monitor?.clientId);
   const files = await aguardarExecucao(promptId);
   const file = files[0];
@@ -301,32 +318,41 @@ export async function gerarImagemSlide(prompt, seed = 42, monitor = null) {
   return join(COMFY_OUTPUT_DIR, file);
 }
 
-export async function gerarImagensSlides(slides, outDir, roteiro) {
+// opts.apenas = id de UM slide: só essa imagem é gerada (nenhuma outra, nem as
+// artes) — é o caminho do botão "🖼 gerar"/"↻ refazer" da tela do projeto. Sem
+// opts, gera todas as que faltarem. O rótulo "imagem X/Y" e a seed continuam
+// usando o índice GLOBAL do slide; o percentual da barra cobre só o job atual
+// quando for `apenas`.
+export async function gerarImagensSlides(slides, outDir, roteiro, opts = {}) {
+  const apenas = opts.apenas || null;
   const imagens = [];
   const falhas = [];
   const n = slides.length;
   const totalItens = n + 2; // intro + slides + conclusão
-  for (let i = 0; i < n; i++) {
-    const slide = slides[i];
+  const alvos = slides
+    .map((slide, i) => ({ slide, i }))
+    .filter(({ slide }) => !apenas || slide.id === apenas);
+  if (apenas && !alvos.length) throw new Error(`Slide "${apenas}" não encontrado no roteiro`);
+  for (const { slide, i } of alvos) {
     const dest = join(outDir, `slide-${String(i + 1).padStart(2, '0')}.png`);
     if (existsSync(dest)) {
       console.error(`  [imagem ${i + 1}/${n}] ${slide.titulo} (já existe, pulando)`);
       imagens.push({ id: slide.id, path: dest });
       continue;
     }
-    // Seed: por padrão a MESMA em todas as cenas — seed fixa ajuda o modelo a
-    // manter o mesmo "desenho" entre os slides (personagens consistentes).
-    // SEED_POR_SLIDE=1 volta ao comportamento antigo (uma seed por slide).
+    // Seed própria por slide (SEED_POR_SLIDE, padrão) — a mesma seed em todas as
+    // cenas faz o modelo repetir quase a mesma imagem. SEED_POR_SLIDE=0 usa a
+    // mesma seed no conjunto inteiro.
     const seed = SEED_POR_SLIDE ? SEED_BASE + i * 137 : SEED_BASE;
     const inicioImg = Date.now();
     let feito = false;
-    for (let t = 1; t <= ZIMAGE_TENTATIVAS && !feito; t++) {
+    for (let t = 1; t <= TENTATIVAS && !feito; t++) {
       const monitor = criarMonitorProgresso();
       const parar = acompanharComfyUI(monitor, {
         cabecalho: `imagem ${i + 1}/${n}`,
         detalhe: slide.titulo,
-        baseIdx: i + 1,
-        total: totalItens,
+        baseIdx: apenas ? 0 : i + 1,
+        total: apenas ? 1 : totalItens,
         inicio: inicioImg,
       });
       try {
@@ -337,9 +363,9 @@ export async function gerarImagensSlides(slides, outDir, roteiro) {
         console.error(`  OK: ${dest}`);
         feito = true;
       } catch (e) {
-        console.error(`  [imagem ${i + 1}/${n}] tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
+        console.error(`  [imagem ${i + 1}/${n}] tentativa ${t}/${TENTATIVAS} falhou: ${e.message}`);
         await interromperComfyUI();
-        if (t < ZIMAGE_TENTATIVAS) {
+        if (t < TENTATIVAS) {
           console.error(`  [imagem ${i + 1}/${n}] aguardando 5s e tentando de novo ...`);
           await sleep(5000);
         }
@@ -352,13 +378,13 @@ export async function gerarImagensSlides(slides, outDir, roteiro) {
   }
   if (falhas.length) {
     const resumo = falhas.map((f) => `${f.id} (${f.titulo})`).join(', ');
-    throw new Error(`Falha ao gerar ${falhas.length} imagem(ns) após ${ZIMAGE_TENTATIVAS} tentativas: ${resumo}`);
+    throw new Error(`Falha ao gerar ${falhas.length} imagem(ns) após ${TENTATIVAS} tentativas: ${resumo}`);
   }
   return imagens;
 }
 
 // Gera UMA imagem de arte (abertura/encerramento) com o mesmo fluxo dos slides:
-// pula se já existe, tenta até ZIMAGE_TENTATIVAS, interrompe o ComfyUI antes de retry.
+// pula se já existe, tenta até TENTATIVAS, interrompe o ComfyUI antes de retry.
 // Falha aqui NÃO derruba a etapa — vira aviso (o montar_video tem fallback).
 // pos/total = posição da arte no conjunto geral, para o percentual global.
 async function gerarImagemArte(prompt, dest, seed, rotulo, pos, total) {
@@ -368,7 +394,7 @@ async function gerarImagemArte(prompt, dest, seed, rotulo, pos, total) {
   }
   const inicioImg = Date.now();
   let feito = false;
-  for (let t = 1; t <= ZIMAGE_TENTATIVAS && !feito; t++) {
+  for (let t = 1; t <= TENTATIVAS && !feito; t++) {
     const monitor = criarMonitorProgresso();
     const parar = acompanharComfyUI(monitor, {
       cabecalho: `arte ${pos + 1}/${total}`,
@@ -384,9 +410,9 @@ async function gerarImagemArte(prompt, dest, seed, rotulo, pos, total) {
       console.error(`  OK: ${dest}`);
       feito = true;
     } catch (e) {
-      console.error(`  [arte] ${rotulo} tentativa ${t}/${ZIMAGE_TENTATIVAS} falhou: ${e.message}`);
+      console.error(`  [arte] ${rotulo} tentativa ${t}/${TENTATIVAS} falhou: ${e.message}`);
       await interromperComfyUI();
-      if (t < ZIMAGE_TENTATIVAS) {
+      if (t < TENTATIVAS) {
         console.error(`  [arte] ${rotulo} aguardando 5s e tentando de novo ...`);
         await sleep(5000);
       }
@@ -402,18 +428,58 @@ async function gerarImagemArte(prompt, dest, seed, rotulo, pos, total) {
 async function main() {
   const roteiroPath = process.argv[2];
   if (!roteiroPath) {
-    console.error('Uso: node gerar_imagens.mjs <caminho/roteiro.json>');
+    console.error('Uso: node gerar_imagens.mjs <caminho/roteiro.json> [--arte <intro|conclusao>] [--apenas <slideId>]');
     process.exit(1);
   }
   const roteiro = JSON.parse(await readFile(roteiroPath, 'utf8'));
   const outDir = dirname(roteiroPath);
   const totalItens = roteiro.slides.length + 2;
+
+  // --arte <intro|conclusao>: regenera só uma arte de abertura/encerramento
+  const iArte = process.argv.indexOf('--arte');
+  const arteSolo = iArte !== -1 ? process.argv[iArte + 1] : null;
+  if (arteSolo) {
+    const ehIntro = arteSolo === 'intro';
+    const dest = join(outDir, ehIntro ? '00-intro.png' : 'outro.png');
+    if (existsSync(dest)) await unlink(dest); // regerar: apaga o PNG antes
+    console.error(`[2/4] Gerando arte de ${ehIntro ? 'abertura' : 'encerramento'} ...`);
+    await gerarImagemArte(
+      buildPromptArte(ehIntro ? roteiro.introducao_imagem_prompt : roteiro.conclusao_imagem_prompt, ehIntro ? PROMPT_INTRO : PROMPT_OUTRO),
+      dest, SEED_BASE + (ehIntro ? 900001 : 900002), ehIntro ? 'abertura' : 'encerramento',
+      ehIntro ? 0 : totalItens - 1, totalItens,
+    );
+    console.log(JSON.stringify([]));
+    return;
+  }
+
+  // --apenas <slideId>: gera SÓ essa imagem (nenhum outro slide pendente, nem as
+  // artes). O servidor web usa isso no botão "🖼 gerar"/"↻ refazer" de um bloco;
+  // sem a flag o script continua gerando tudo que faltar.
+  const iApenas = process.argv.indexOf('--apenas');
+  const apenasId = iApenas !== -1 ? process.argv[iApenas + 1] : null;
+  if (apenasId) {
+    if (!roteiro.slides.some((s) => s.id === apenasId)) {
+      console.error(`ERRO: slide "${apenasId}" não encontrado no roteiro`);
+      process.exit(1);
+    }
+    console.error(`[2/4] Gerando imagem do slide ${apenasId} ...`);
+    const imagens = await gerarImagensSlides(roteiro.slides, outDir, roteiro, { apenas: apenasId });
+    console.log(JSON.stringify(imagens));
+    return;
+  }
+
   console.error(`[2/4] Gerando ${roteiro.slides.length} imagens ...`);
   const imagens = await gerarImagensSlides(roteiro.slides, outDir, roteiro);
-  console.error('  Gerando imagem de abertura (mulher com a Bíblia infantil) ...');
-  await gerarImagemArte(PROMPT_INTRO, join(outDir, '00-intro.png'), SEED_BASE + 900001, 'abertura', 0, totalItens);
-  console.error('  Gerando imagem de encerramento ...');
-  await gerarImagemArte(PROMPT_OUTRO, join(outDir, 'outro.png'), SEED_BASE + 900002, 'encerramento', totalItens - 1, totalItens);
+  console.error('  Gerando imagem de abertura (a partir do roteiro) ...');
+  await gerarImagemArte(
+    buildPromptArte(roteiro.introducao_imagem_prompt, PROMPT_INTRO),
+    join(outDir, '00-intro.png'), SEED_BASE + 900001, 'abertura', 0, totalItens,
+  );
+  console.error('  Gerando imagem de encerramento (a partir do roteiro) ...');
+  await gerarImagemArte(
+    buildPromptArte(roteiro.conclusao_imagem_prompt, PROMPT_OUTRO),
+    join(outDir, 'outro.png'), SEED_BASE + 900002, 'encerramento', totalItens - 1, totalItens,
+  );
   console.log(JSON.stringify(imagens));
 }
 

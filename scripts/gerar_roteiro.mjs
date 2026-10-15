@@ -46,16 +46,18 @@ Gere SEMPRE um JSON válido, sem markdown, sem texto extra, com esta estrutura e
   "titulo_aula": "Nome da história (ex.: A Arca de Noé)",
   "personagens": "Descrição visual fixa, EM INGLÊS, de cada personagem principal (2 a 4), para que o ilustrador desenhe SEMPRE o mesmo personagem em todas as cenas. Separe os personagens com ponto e vírgula. Para cada um: idade, corpo, cabelo, olhos, roupa e um traço marcante. Ex.: 'Noah: elderly man with a long white beard, kind blue eyes, sturdy build, simple brown robe and leather sandals; Noah's wife: elderly woman with silver hair in a bun, warm brown eyes, long dark-red dress'",
   "introducao": "2-3 frases curtas de abertura narradas para a criança, com um gancho que desperte curiosidade, citando a referência bíblica",
+  "introducao_imagem_prompt": "Prompt em inglês da ARTE DE ABERTURA do vídeo: uma professora gentil com a Bíblia infantil aberta, ensinando crianças (cena de abertura, sem texto). Relacione com a história (ex.: a professora apresentando Noé e sua arca). NÃO inclua estilo nem palavras sobre texto",
   "slides": [
     {
       "id": "slide-01",
       "titulo": "Título curto do slide (max 6 palavras, linguagem simples)",
       "narracao": "25-35 palavras narradas, frases curtas, contando a história de forma acolhedora e lúdica, sem citar referências bíblicas",
-      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS UMA cena ÚNICA da história, como a ilustração de um livro infantil (personagens e objetos da história, o que está acontecendo, o cenário). VARIE o enquadramento entre os slides: close no rosto, plano médio, plano aberto, ângulo alto/baixo, personagem em ação — nunca duas cenas com o mesmo enquadramento seguidas. NÃO inclua estilo nem palavras sobre texto — o estilo (2D de livro infantil) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'",
+      "imagem_prompt": "Prompt de imagem em inglês (EN) descrevendo APENAS UMA cena ÚNICA da história, como a ilustração de um livro infantil (o que está acontecendo, o cenário). Cite cada personagem APENAS pelo nome — NUNCA repita a aparência (cabelo, roupa, olhos...), porque ela já vem do campo personagens e repetir em palavras diferentes faz o ilustrador desenhar o personagem DUPLICADO na mesma cena. VARIE o enquadramento entre os slides: close no rosto, plano médio, plano aberto, ângulo alto/baixo, personagem em ação — nunca duas cenas com o mesmo enquadramento seguidas. NÃO inclua estilo nem palavras sobre texto — o estilo (Disney/Pixar 3D) e a proibição de texto na imagem são adicionados automaticamente depois. Ex.: 'Noah hammering on a giant wooden ark while small birds and animals peek out from the windows'",
       "personagens": "APENAS os personagens que aparecem NESTA cena, com a aparência copiada do campo personagens global, separados por ponto e vírgula. NUNCA liste quem não está na cena. Ex.: 'Noah: elderly man with a long white beard, kind blue eyes, sturdy build, simple brown robe and leather sandals'"
     }
   ],
-  "conclusao": "2-4 frases de encerramento narradas: uma moral simples para a criança e o convite para curtir e se inscrever no canal para ouvir mais historinhas bíblicas"
+  "conclusao": "2-4 frases de encerramento narradas: uma moral simples para a criança e o convite para curtir e se inscrever no canal para ouvir mais historinhas bíblicas",
+  "conclusao_imagem_prompt": "Prompt em inglês da ARTE DE ENCERRAMENTO do vídeo: a professora e as crianças acenando tchau ao fim da aula, com clima de alegria e a moral da história (cena final, sem texto). NÃO inclua estilo nem palavras sobre texto"
 }
 
 REGRAS:
@@ -69,8 +71,24 @@ REGRAS:
 - Referências bíblicas: apenas a introdução deve citar a referência bíblica na narração. Nos slides e na conclusão NÃO mencione nenhuma referência na narração.
 - As referências devem estar corretas e fiéis à história bíblica, mantendo o tom educacional, cristão e edificante.
 - Narração legível por leitor de voz (TTS): quando uma referência bíblica for citada na narração (apenas na introducao), escreva-a por extenso como seria falada, ex.: "Gênesis 6, 14" em vez de "Gênesis 6:14", "João 3, 16" em vez de "João 3:16".
-- imagem_prompt: em inglês, UMA cena ÚNICA e CLARA que conte a história, com personagens e objetos da cena. Não escreva estilos nem proibições de texto — isso é adicionado automaticamente.
+- imagem_prompt: em inglês, UMA cena ÚNICA e CLARA que conte a história, com o cenário e o que está acontecendo. Cite os personagens APENAS pelo nome (sem repetir a aparência — ela já vem do campo personagens; repetir em palavras diferentes duplica o personagem na imagem). Não escreva estilos nem proibições de texto — isso é adicionado automaticamente.
+- introducao_imagem_prompt e conclusao_imagem_prompt: SEMPRE preenchidos, em inglês, descrevendo as artes de abertura e encerramento (a professora com a Bíblia infantil / a despedida). Não escreva estilos nem proibições de texto. NÃO inclua os personagens da história bíblica nessas artes — elas mostram só a professora e as crianças.
 - Consistência dos personagens: os personagens devem aparecer com EXATAMENTE a aparência descrita em "personagens", em todos os slides, sem mudar roupa, cabelo ou idade entre as cenas.`;
+
+// Garante que o roteiro SEMPRE traga os prompts das artes de abertura e
+// encerramento (a imagem do vídeo sai deles). Se o modelo omitir, usa um prompt
+// de reserva — o usuário pode editá-lo na tela antes de gerar a imagem.
+const PROMPT_ARTE_INTRO_RESERVA =
+  'a kind young woman teacher holding an open children\'s Bible storybook, smiling warmly, surrounded by happy children sitting on a colorful rug in a cozy reading corner';
+const PROMPT_ARTE_CONCLUSAO_RESERVA =
+  'a kind young woman teacher waving goodbye with a warm smile, a small group of happy children waving back and cheering, joyful end-of-lesson scene';
+
+function completarPromptsArte(roteiro) {
+  const limpo = (v) => (typeof v === 'string' ? v.trim() : '');
+  roteiro.introducao_imagem_prompt = limpo(roteiro.introducao_imagem_prompt) || PROMPT_ARTE_INTRO_RESERVA;
+  roteiro.conclusao_imagem_prompt = limpo(roteiro.conclusao_imagem_prompt) || PROMPT_ARTE_CONCLUSAO_RESERVA;
+  return roteiro;
+}
 
 export async function gerarRoteiro(topico) {
   // Mínimo de slides = número de cenas. Cada slide é UMA cena da história.
@@ -120,7 +138,7 @@ export async function gerarRoteiro(topico) {
     }
 
     if (Array.isArray(roteiro.slides) && roteiro.slides.length >= MIN_SLIDES) {
-      return roteiro;
+      return completarPromptsArte(roteiro);
     }
     ultimaRota = roteiro;
   }

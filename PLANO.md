@@ -20,7 +20,7 @@ Pipeline local de 4 etapas encadeadas, cada uma consumindo a anterior:
 
 1. `gerar_roteiro.mjs` — llama-server (OpenAI-compatible, `LLAMA_URL`) com um
    `SYSTEM_PROMPT`; gera o `roteiro.json` (≥15 slides).
-2. `gerar_imagens.mjs` — ComfyUI (workflow Qwen-image 2.1 GGUF, estilo Pixar 3D, personagens consistentes, uma cena por slide) salva
+2. `gerar_imagens.mjs` — ComfyUI (workflow Krea 2 Turbo + LoRA Pixar 3D, estilo Disney/Pixar 3D, personagens consistentes, uma cena por slide) salva
    `slide-NN.png`; pula imagens existentes.
 3. `gerar_narracao.mjs` — CLI `edge-tts` gera os MP3s (voz default masculina).
 4. `montar_video.mjs` — html-video core (Chromium + ffmpeg) renderiza o MP4,
@@ -61,7 +61,7 @@ Copiar de `videoaulas-teologia` → `002`:
 - Contrato do `roteiro.json`.
 - Fluxo das 4 etapas e regras de idempotência.
 - Interface web (lógica `app.js`, `style.css`).
-- Requisitos externos (llama-server, ComfyUI/Qwen-image 2.1, edge-tts, ffmpeg, playwright).
+- Requisitos externos (llama-server, ComfyUI/Krea 2 Turbo, edge-tts, ffmpeg, playwright).
 
 ## Como gerar cada formato (CLI)
 
@@ -91,5 +91,5 @@ em 9:16, as imagens também são geradas em 9:16 — nunca um formato misturado.
 ## Fora de escopo / riscos
 
 - `node_modules/` é vendored — atualizar recopiando de `F:\codigos\html-video\packages\{core,content-graph,adapter-hyperframes}\dist`; nunca via npm.
-- Gotchas herdados: porta `5173` pode colidir em IPv6 (usar `http://127.0.0.1:5173/`); arquivos UTF-8; `montar_video.mjs` roda `main()` incondicionalmente (importá-lo executaria). (O gotcha do `UnetLoaderGGUF`/`ComfyUI-GGUF-FantasyTalking` era do Z-Image Turbo e não se aplica mais: o workflow agora é Qwen-image 2.1 com `UnetLoaderGGUF`, validado contra o `object_info` do ComfyUI.)
+- Gotchas herdados: porta `5173` pode colidir em IPv6 (usar `http://127.0.0.1:5173/`); arquivos UTF-8; `montar_video.mjs` roda `main()` incondicionalmente (importá-lo executaria). (Workflow de imagem hoje: **Krea 2 Turbo + LoRA purePixarStyle3D** — ver AGENTS.md; os gotchas antigos de `UnetLoaderGGUF`/Z-Image/Qwen-image 2.1 não se aplicam mais.)
 - Binários do Playwright não são vendored (cache em `%LOCALAPPDATA%\ms-playwright`).

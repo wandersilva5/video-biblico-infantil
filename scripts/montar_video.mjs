@@ -442,20 +442,18 @@ async function main() {
   // 5. Escrever frames HTML
   const total = roteiro.slides.length + 2;
   const projectDir = await projects.ensureDir(project.id);
-  // Arte de abertura (00-intro.png) e encerramento (outro.png): usadas quando
-  // existem; senão, os frames caem no layout sem imagem (fallback).
-  let introImgName = null;
+  // Arte de abertura (00-intro.png) e encerramento (outro.png) geradas a partir
+  // dos prompts do roteiro. Obrigatórias: sem elas o vídeo não é montado.
   const introImgPath = join(outDir, '00-intro.png');
-  if (existsSync(introImgPath)) {
-    await copyFile(introImgPath, join(projectDir, 'frames', '00-intro.png'));
-    introImgName = '00-intro.png';
-  }
-  let outroImgName = null;
   const outroImgPath = join(outDir, 'outro.png');
-  if (existsSync(outroImgPath)) {
-    await copyFile(outroImgPath, join(projectDir, 'frames', 'outro.png'));
-    outroImgName = 'outro.png';
+  const faltantes = [introImgPath, outroImgPath].filter((p) => !existsSync(p));
+  if (faltantes.length) {
+    throw new Error(`Artes de abertura/encerramento não encontradas: ${faltantes.map((p) => basename(p)).join(', ')}. Gere-as antes de montar o vídeo.`);
   }
+  await copyFile(introImgPath, join(projectDir, 'frames', '00-intro.png'));
+  const introImgName = '00-intro.png';
+  await copyFile(outroImgPath, join(projectDir, 'frames', 'outro.png'));
+  const outroImgName = 'outro.png';
   await orchestrator.writeFrameHtml(project.id, 'intro', gerarFrameIntro(roteiro, introImgName, audios[0].durationSec + SLIDE_PADDING_SEC));
   for (let i = 0; i < roteiro.slides.length; i++) {
     const slide = roteiro.slides[i];

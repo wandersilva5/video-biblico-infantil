@@ -18,16 +18,17 @@ const DEFAULTS = {
   LLAMA_URL: 'http://127.0.0.1:8091',
   COMFY_URL: 'http://127.0.0.1:8188',
   COMFY_OUTPUT_DIR: 'D:\\ComfyUI_windows_portable\\ComfyUI\\output',
-  // Modelos do Qwen-image 2.1 (GGUF) no ComfyUI local.
-  ZIMAGE_UNET: 'qwen\\qwen-image-2.1-Q5_K_M.gguf',
-  ZIMAGE_CLIP: 'qwen3vl_8b_int8_convrot.safetensors',
-  ZIMAGE_VAE: 'qwen_image_2.1_vae_bf16.safetensors',
-  ZIMAGE_LORA: 'qwen\\p_qwen_image_2.1_8step_v0.1.safetensors',
-  ZIMAGE_STEPS: '8',
-  ZIMAGE_LORA_STRENGTH: '1.0',
-  QWEN_CLIP_DEVICE: 'cpu',
+  // Krea 2 Turbo (fp8) + LoRA Pixar 3D no ComfyUI local (blueprint oficial).
+  KREA2_UNET: 'Krea2\\krea2_turbo_fp8_scaled.safetensors',
+  KREA2_CLIP: 'qwen\\qwen3vl_4b_fp8_scaled.safetensors',
+  KREA2_CLIP_DEVICE: 'default',
+  KREA2_VAE: 'qwen_image_vae.safetensors',
+  KREA2_LORA: 'Krea2\\purePixarStyle3D_v1.safetensors',
+  KREA2_LORA_FORCA: '1.0',
+  KREA2_STEPS: '8',
+  KREA2_TRIGGER: 'KR2Pix',
   ESTILO_SUFIXO:
-    "2D children's picture book illustration, flat watercolor and gouache painting with visible brush strokes and paper texture, hand-drawn storybook art, soft warm pastel palette, simple flat shading, charming naive children's book style, absolutely not 3D not CGI not photorealistic",
+    "children's animated film still in Disney-Pixar 3D animation style, soft rounded character design, big expressive eyes, warm vibrant colors, cinematic lighting, detailed stylized 3D render, family-friendly animated movie look",
   MIN_SLIDES: '12',
   TTS: 'edge-tts',
   VOZ: 'pt-BR-FranciscaNeural',
@@ -65,6 +66,11 @@ const slugDe = (t) =>
     .replace(/^-+|-+$/g, '');
 
 const hashDe = (t) => createHash('sha1').update(t ?? '').digest('hex');
+
+// Artes de abertura/encerramento: id -> arquivo PNG em output/<slug>/
+const ARTE_PNG = { intro: '00-intro.png', conclusao: 'outro.png' };
+const promptArte = (roteiro, id) =>
+  (id === 'intro' ? roteiro.introducao_imagem_prompt : roteiro.conclusao_imagem_prompt) || '';
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -288,6 +294,21 @@ async function artefatos(slug) {
     };
   });
 
+  // Artes de abertura (00-intro.png) e encerramento (outro.png): prompts vêm do roteiro.
+  const arteDe = (chave, png, prompt) => {
+    const esperado = manifest.imagem?.[chave];
+    return {
+      existe: existsSync(join(outDir, png)),
+      mtime: mtimeDe(join(outDir, png)),
+      desatualizado: esperado ? esperado !== hashDe(prompt) : false,
+      prompt: prompt || '',
+    };
+  };
+  const arte = {
+    intro: arteDe('intro', ARTE_PNG.intro, promptArte(roteiro, 'intro')),
+    conclusao: arteDe('conclusao', ARTE_PNG.conclusao, promptArte(roteiro, 'conclusao')),
+  };
+
   const videos = (await readdir(outDir))
     .filter((f) => f.toLowerCase().endsWith('.mp4'))
     .map((f) => {
@@ -301,6 +322,7 @@ async function artefatos(slug) {
     roteiroMtime,
     intro: audioDe(itens[0]),
     slides,
+    arte,
     conclusao: audioDe(itens[itens.length - 1]),
     video: {
       existe: !!ultimo,
@@ -310,7 +332,7 @@ async function artefatos(slug) {
     },
     videos,
     audioCompleto: [itens[0], ...itens.slice(1, -1), itens[itens.length - 1]].every((it) => audioDe(it).existe),
-    imagensCompletas: slides.every((s) => s.imagem.existe),
+    imagensCompletas: slides.every((s) => s.imagem.existe) && arte.intro.existe && arte.conclusao.existe,
   };
 }
 
@@ -518,6 +540,14 @@ const server = createServer(async (req, res) => {
       const body = await lerBody(req);
       if (!body.slideId) return json(res, 400, { erro: 'Campo "slideId" é obrigatório' });
       const roteiro = await lerRoteiro(slug);
+      if (ARTE_PNG[body.slideId]) {
+        const png = join(OUTPUT_DIR, slug, ARTE_PNG[body.slideId]);
+        if (existsSync(png)) await unlink(png);
+        const manifest = await lerManifesto(slug);
+        delete manifest.imagem[body.slideId];
+        await salvarManifesto(slug, manifest);
+        return json(res, 200, { ok: true });
+      }
       const idx = roteiro.slides.findIndex((s) => s.id === body.slideId);
       if (idx === -1) return json(res, 400, { erro: `Slide "${body.slideId}" não encontrado` });
       const png = join(OUTPUT_DIR, slug, `slide-${String(idx + 1).padStart(2, '0')}.png`);
@@ -534,7 +564,15 @@ const server = createServer(async (req, res) => {
       const roteiro = await lerRoteiro(slug);
       const outDir = join(OUTPUT_DIR, slug);
       const backups = [];
-      if (body.slideId) {
+      if (body.slideId && ARTE_PNG[body.slideId]) {
+        // Arte de abertura/encerramento: só ela é regenerada
+        const png = join(outDir, ARTE_PNG[body.slideId]);
+        if (existsSync(png)) {
+          const bak = png + '.bak';
+          await rename(png, bak);
+          backups.push({ original: png, backup: bak });
+        }
+      } else if (body.slideId) {
         const idx = roteiro.slides.findIndex((s) => s.id === body.slideId);
         if (idx === -1) return json(res, 400, { erro: `Slide "${body.slideId}" não encontrado` });
         const png = join(outDir, `slide-${String(idx + 1).padStart(2, '0')}.png`);
@@ -554,8 +592,17 @@ const server = createServer(async (req, res) => {
         }
       }
       const env = body.variar ? { KREA2_SEED_BASE: String(Math.floor(Math.random() * 1e9)) } : {};
+      // Arte de abertura/encerramento: gerada direto (sem refazer os slides).
+      // Slide individual: --apenas faz o gerador criar SÓ esse PNG — sem a flag
+      // ele gera também todos os outros slides/artes que ainda faltarem.
+      const arteAlvo = body.slideId && ARTE_PNG[body.slideId] ? body.slideId : null;
+      const soSlide = !arteAlvo && body.slideId ? ['--apenas', body.slideId] : [];
       try {
-        await runJob({ etapa: 'imagens', args: [join(SCRIPTS_DIR, 'gerar_imagens.mjs'), roteiroPath], env });
+        await runJob({
+          etapa: 'imagens',
+          args: [join(SCRIPTS_DIR, 'gerar_imagens.mjs'), roteiroPath, ...(arteAlvo ? ['--arte', arteAlvo] : soSlide)],
+          env,
+        });
         for (const { backup } of backups) {
           if (existsSync(backup)) await unlink(backup);
         }
@@ -565,7 +612,19 @@ const server = createServer(async (req, res) => {
         }
         return json(res, e.code === 'JOB_ATIVO' ? 409 : 500, { erro: e.message });
       }
+      if (arteAlvo && !existsSync(join(outDir, ARTE_PNG[arteAlvo]))) {
+        for (const { original, backup } of backups) {
+          if (existsSync(backup)) await rename(backup, original);
+        }
+        return json(res, 500, { erro: `Não foi possível gerar a arte "${arteAlvo}". Veja o log.` });
+      }
       const manifest = await lerManifesto(slug);
+      if (arteAlvo) {
+        manifest.imagem[arteAlvo] = hashDe(promptArte(roteiro, arteAlvo));
+        await salvarManifesto(slug, manifest);
+        for (const { backup } of backups) if (existsSync(backup)) await unlink(backup);
+        return json(res, 200, { ok: true });
+      }
       const alvos = body.slideId ? [body.slideId] : roteiro.slides.map((s) => s.id);
       for (const id of alvos) {
         const s = roteiro.slides.find((x) => x.id === id);
@@ -638,7 +697,7 @@ const server = createServer(async (req, res) => {
       if (!existsSync(roteiroPath)) return json(res, 404, { erro: 'Roteiro não existe' });
       const st = await artefatos(slug);
       const faltando = [];
-      if (!st.imagensCompletas) faltando.push('imagens de todos os slides');
+      if (!st.imagensCompletas) faltando.push('imagens de todos os slides e as artes de abertura/encerramento');
       if (!st.audioCompleto) faltando.push('narrações de todos os itens');
       if (faltando.length) {
         return json(res, 400, { erro: `Faltam artefatos: ${faltando.join(' e ')}. Gere-os antes de montar o vídeo.` });
