@@ -115,7 +115,7 @@ function unificar(roteiro, artefatos) {
     id: 'conclusao', tipo: 'conclusao', rotulo: 'Conclusão',
     titulo: '', texto: r.conclusao,
     prompt: r.conclusao_imagem_prompt || '',
-    prefix: `${String(totalNarra).padStart(2, '0')}-conclusao`,
+    prefix: `${String(totalNarra - 1).padStart(2, '0')}-conclusao`,
     imagem: imgDe(arte.conclusao), arteSrc: 'outro.png', audio: st.conclusao,
     narraIdx: totalNarra, narraTotal: totalNarra,
   });
