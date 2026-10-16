@@ -89,7 +89,20 @@ function ttsQwen(texto, outMp3) {
       '--texto', texto,
       '--saida', wavTmp,
     ];
-    const env = { ...process.env, QWEN_ROOT, QWEN_REF, QWEN_REF_START, QWEN_REF_END, QWEN_REF_TEXTO, QWEN_MAX_STEPS, QWEN_TEMP };
+    // PYTHONUTF8/PYTHONIOENCODING são obrigatórios: a engine imprime emojis/chiês no
+    // stdout e, sem eles, o Python herda cp1252 e trava com UnicodeEncodeError.
+    const env = {
+      ...process.env,
+      PYTHONUTF8: '1',
+      PYTHONIOENCODING: 'utf-8',
+      QWEN_ROOT,
+      QWEN_REF,
+      QWEN_REF_START,
+      QWEN_REF_END,
+      QWEN_REF_TEXTO,
+      QWEN_MAX_STEPS,
+      QWEN_TEMP,
+    };
     const proc = spawn(QWEN_PYTHON, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
     let log = '';
     proc.stdout.on('data', (d) => (log += d.toString()));

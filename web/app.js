@@ -566,65 +566,60 @@ function Bloco({ item, ativo }) {
     }
   };
 
+const temTitulo = item.tipo !== 'conclusao';
+  const promptAjuda = isArte
+    ? 'Cena da arte de abertura/encerramento (professora com a Bíblia infantil / despedida). Estilo Pixar 3D e personagens fixos entram automaticamente. Ao salvar, a arte fica marcada “prompt alterado”; use ↻ refazer.'
+    : 'Descreva UMA cena com os personagens certos (evite repetir quem já apareceu). Estilo Pixar 3D e a lista fixa de personagens entram automaticamente na geração — não escreva estilo aqui. Ao salvar, a imagem fica marcada “prompt alterado”; use ↻ refazer para gerar de novo.';
+
   return html`
     <div className="bloco" data-id=${item.id}>
       <div className="bloco-cab">
         <span className="bloco-tipo">${item.rotulo}</span>
+        ${temTitulo
+          ? html`<input
+              className="edit-titulo"
+              type="text"
+              placeholder="Título do slide"
+              value=${tituloDraft}
+              disabled=${s.jobAtivo}
+              onInput=${(e) => setTituloDraft(e.target.value)}
+            />`
+          : null}
         ${sujoGeral ? html`<span className="badge alerta pulse">${rotuloSujo}</span>` : null}
       </div>
       <div className=${`bloco-grid ${temArte ? '' : 'sem-img'}`}>
-        <div className="bloco-col bloco-col-texto">
-          ${item.tipo !== 'conclusao'
-            ? html`<input
-                className="edit-titulo"
-                type="text"
-                placeholder="Título do bloco"
-                value=${tituloDraft}
-                disabled=${s.jobAtivo}
-                onInput=${(e) => setTituloDraft(e.target.value)}
-              />`
-            : null}
+        <div className="bloco-cel">
+          <span className="cel-rotulo">Narração</span>
           <textarea
             className="edit-texto"
-            rows="6"
-            placeholder="Texto da narração…"
+            rows="5"
+            placeholder="Texto da narração..."
             value=${textoDraft}
             disabled=${s.jobAtivo}
             onInput=${(e) => setTextoDraft(e.target.value)}
           ></textarea>
-          ${temArte
-            ? html`
-              <div className="prompt-editor">
-                <div className="prompt-cab">
-                  <span>✍ Prompt da imagem (inglês)</span>
-                  ${sujoPrompt ? html`<span className="badge alerta pulse">não salvo</span>` : null}
-                </div>
-                <textarea
-                  className="edit-texto edit-prompt"
-                  rows="4"
-                  placeholder="Who is in the scene, what happens, where... (ex.: Noah feeding a lamb on the ark deck, two giraffes watching)"
-                  value=${promptDraft}
-                  disabled=${s.jobAtivo}
-                  onInput=${(e) => setPromptDraft(e.target.value)}
-                ></textarea>
-                <span className="prompt-ajuda">${isArte
-                  ? 'Cena da arte de abertura/encerramento (professora com a Bíblia infantil / despedida). Estilo Pixar 3D e personagens fixos entram automaticamente. Ao salvar, a arte fica marcada “prompt alterado”; use ↻ refazer.'
-                  : 'Descreva UMA cena com os personagens certos (evite repetir quem já apareceu). Estilo Pixar 3D e a lista fixa de personagens entram automaticamente na geração — não escreva estilo aqui. Ao salvar, a imagem fica marcada “prompt alterado”; use ↻ refazer para gerar de novo.'}</span>
-              </div>`
-            : null}
-          <div className="edit-rodape">
-            <span className=${`contador ${palavras >= 20 && palavras <= 45 ? 'dentro' : 'fora'}`}>${palavras} palavras</span>
-            <button
-              className="btn btn-mini btn-primario"
-              disabled=${!sujoGeral || s.jobAtivo}
-              title="Salvar texto, título e prompt da imagem deste bloco no roteiro"
-              onClick=${() => salvarTextoBloco(item.id, tituloDraft, textoDraft, promptDraft)}
-            >💾 Salvar</button>
-          </div>
         </div>
         ${temArte
+          ? html`<div className="bloco-cel">
+              <span className="cel-rotulo">
+                ✍ Prompt da imagem (inglês)
+                ${sujoPrompt ? html`<span className="badge alerta pulse">não salvo</span>` : null}
+              </span>
+              <textarea
+                className="edit-texto edit-prompt"
+                rows="5"
+                title=${promptAjuda}
+                placeholder="Who is in the scene, what happens, where... (ex.: Noah feeding a lamb on the ark deck, two giraffes watching)"
+                value=${promptDraft}
+                disabled=${s.jobAtivo}
+                onInput=${(e) => setPromptDraft(e.target.value)}
+              ></textarea>
+            </div>`
+          : null}
+        ${temArte
           ? html`
-            <div className="bloco-col bloco-col-img">
+            <div className="bloco-cel cel-img">
+              <span className="cel-rotulo">Imagem</span>
               ${temImagem
                 ? html`
                   <div className="thumb-wrap" title=${isSlide ? 'Clique para ver em tela cheia' : ''} onClick=${() => { if (isSlide) abrirModalSlidePara(item.id); }}>
@@ -659,7 +654,8 @@ function Bloco({ item, ativo }) {
               </div>
             </div>`
           : null}
-        <div className="bloco-col bloco-col-audio">
+<div className="bloco-cel cel-audio">
+          <span className="cel-rotulo">Áudio</span>
           <div className="audio-area">
             ${temAudio
               ? html`
@@ -669,7 +665,7 @@ function Bloco({ item, ativo }) {
                   ${gerandoAudio ? html`<span className="badge alerta pulse">↻ regenerando</span>` : null}
                 </div>`
               : gerandoAudio
-                ? html`<${ProgressoItem} pct=${ativo.pct} rotulo="gerando áudio…" />`
+                ? html`<${ProgressoItem} pct=${ativo.pct} rotulo="gerando áudio..." />`
                 : html`<span className="msg-progresso">sem áudio ainda</span>`}
           </div>
           <div className="bloco-acao">
@@ -677,6 +673,18 @@ function Bloco({ item, ativo }) {
             ${temAudio
               ? html`<button className="btn btn-mini btn-perigo" disabled=${s.jobAtivo} title="Excluir este áudio" onClick=${delAudio}>🗑</button>`
               : null}
+          </div>
+        </div>
+        <div className="bloco-cel cel-acoes">
+          <span className="cel-rotulo">Ações</span>
+          <div className="acoes-corpo">
+            <span className=${`contador ${palavras >= 20 && palavras <= 45 ? 'dentro' : 'fora'}`}>${palavras} palavras</span>
+            <button
+              className="btn btn-mini btn-primario"
+              disabled=${!sujoGeral || s.jobAtivo}
+              title="Salvar texto, título e prompt da imagem deste bloco no roteiro"
+              onClick=${() => salvarTextoBloco(item.id, tituloDraft, textoDraft, promptDraft)}
+            >💾 Salvar</button>
           </div>
         </div>
       </div>

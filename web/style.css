@@ -49,7 +49,7 @@ input, textarea, select { font: inherit; }
 .logo { color: var(--ouro); font-size: 22px; }
 .topo-acoes { display: flex; gap: 8px; }
 
-/* ---------- Botões ---------- */
+/* ---------- BotÃµes ---------- */
 .btn {
   border: 1px solid var(--borda);
   border-radius: 10px;
@@ -150,7 +150,7 @@ input, textarea, select { font: inherit; }
 .passo .status-dot.ok { color: var(--ok); }
 .passo .status-dot.erro { color: var(--alerta); }
 
-/* Conteúdo */
+/* ConteÃºdo */
 .conteudo { padding: 26px 30px 40px; min-width: 0; }
 .caminho { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; flex-wrap: wrap; }
 .caminho h2 { font-size: 20px; }
@@ -170,7 +170,7 @@ input, textarea, select { font: inherit; }
   border-radius: var(--raio); padding: 18px; margin-bottom: 16px;
 }
 
-/* Texto editor (intro/conclusão) */
+/* Texto editor (intro/conclusÃ£o) */
 .campo-texto { width: 100%; margin-bottom: 14px; }
 .campo-texto label { display: block; font-size: 13px; color: var(--texto-2); margin-bottom: 6px; font-weight: 600; }
 .campo-texto textarea {
@@ -200,7 +200,7 @@ input, textarea, select { font: inherit; }
   background: var(--painel-2); border: 1px solid var(--borda);
   border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 700; color: var(--ouro);
 }
-.slide-card .alça { cursor: grab; color: var(--texto-3); font-size: 18px; user-select: none; }
+.slide-card .alÃ§a { cursor: grab; color: var(--texto-3); font-size: 18px; user-select: none; }
 .slide-card .lixeira { margin-left: auto; background: none; border: none; color: var(--texto-3); font-size: 16px; }
 .slide-card .lixeira:hover { color: var(--erro); }
 
@@ -237,7 +237,7 @@ input, textarea, select { font: inherit; }
   background: rgba(11, 19, 32, 0.82); color: var(--alerta); font-weight: 600;
 }
 
-/* Narração */
+/* NarraÃ§Ã£o */
 .item-audio {
   display: flex; align-items: center; gap: 14px;
   background: var(--painel); border: 1px solid var(--borda);
@@ -248,7 +248,7 @@ input, textarea, select { font: inherit; }
 .item-audio audio { flex: 1; min-width: 220px; height: 36px; }
 .item-audio .regen { flex: 0 0 auto; }
 
-/* Vídeo */
+/* VÃ­deo */
 .video-config {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 18px;
 }
@@ -266,7 +266,7 @@ input, textarea, select { font: inherit; }
   background: linear-gradient(90deg, #c99a3c, var(--ouro));
   transition: width 0.6s linear;
 }
-/* Ainda sem passo do ComfyUI: varre a faixa para mostrar que está trabalhando */
+/* Ainda sem passo do ComfyUI: varre a faixa para mostrar que estÃ¡ trabalhando */
 .barra-progresso.indeterminada > div {
   width: 100% !important;
   background: linear-gradient(90deg, transparent 0%, var(--ouro) 45%, transparent 90%);
@@ -407,7 +407,7 @@ input, textarea, select { font: inherit; }
 ::-webkit-scrollbar-thumb { background: #1f3150; border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: #2a3f66; }
 
-/* ---------- Tela única unificada ---------- */
+/* ---------- Tela Ãºnica unificada ---------- */
 .bloco-unificado { display: grid; gap: 20px; }
 
 .bloco {
@@ -478,7 +478,7 @@ input, textarea, select { font: inherit; }
 
 .btn-mini.regen:hover { border-color: var(--ouro); color: #1a1405; }
 
-/* Vídeo final e descrição do texto */
+/* VÃ­deo final e descriÃ§Ã£o do texto */
 .bloco-video { margin-top: 40px; border-top: 1px solid var(--borda); padding-top: 26px; }
 
 .video-descricao {
@@ -504,16 +504,16 @@ input, textarea, select { font: inherit; }
   .conteudo { padding: 20px 16px; }
 }
 
-/* ---------- Interface React (tela única com rotas) ---------- */
+/* ---------- Interface React (tela Ãºnica com rotas) ---------- */
 .conteudo-full {
-  max-width: 1200px; margin: 0 auto; padding: 26px 30px 60px; min-width: 0;
+  max-width: 1720px; margin: 0 auto; padding: 26px 30px 60px; min-width: 0;
 }
 
 @media (max-width: 860px) {
   .conteudo-full { padding: 20px 16px 50px; }
 }
 
-/* Progresso por item (imagem/áudio em geração) */
+/* Progresso por item (imagem/Ã¡udio em geraÃ§Ã£o) */
 .prog-item {
   width: 100%; display: flex; flex-direction: column; gap: 8px;
   align-items: center; justify-content: center; padding: 18px 14px;
@@ -528,7 +528,7 @@ input, textarea, select { font: inherit; }
 }
 .prog-item .barra-progresso { width: 100%; max-width: 320px; margin: 0; }
 
-/* Placeholder de imagem em geração */
+/* Placeholder de imagem em geraÃ§Ã£o */
 .bloco-img.gerando {
   background: linear-gradient(110deg, var(--painel) 8%, var(--painel-2) 18%, var(--painel) 33%);
   background-size: 200% 100%;
@@ -538,7 +538,7 @@ input, textarea, select { font: inherit; }
   to { background-position-x: -200%; }
 }
 
-/* Sobreposição quando regenerando sobre imagem existente */
+/* SobreposiÃ§Ã£o quando regenerando sobre imagem existente */
 .overlay-regen {
   position: absolute; inset: 0; z-index: 2;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -550,7 +550,7 @@ input, textarea, select { font: inherit; }
   width: 86%; height: 10px; margin: 0;
 }
 
-/* Animação de aparição: imagem/áudio carregados durante o job */
+/* AnimaÃ§Ã£o de apariÃ§Ã£o: imagem/Ã¡udio carregados durante o job */
 .bloco-img img { animation: midiaAparece 0.45s ease; }
 .bloco-audio audio { animation: midiaAparece 0.35s ease; }
 @keyframes midiaAparece {
@@ -561,59 +561,60 @@ input, textarea, select { font: inherit; }
 /* Texto de alerta avulso */
 .alerta-texto { color: var(--alerta); }
 
-/* Badge pulsante durante regeneração */
+/* Badge pulsante durante regeneraÃ§Ã£o */
 .badge.pulse { animation: pulseTexto 1.2s ease-in-out infinite; }
 
-/* ---------- Bloco em colunas: texto | imagem | áudio ---------- */
+/* ---------- Bloco em UMA linha: narracao | prompt | imagem | audio | acoes ---------- */
 .bloco-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px 320px;
-  gap: 18px;
-  align-items: start;
+  grid-template-columns:
+    minmax(0, 1.6fr) minmax(0, 1.65fr) minmax(0, 1.1fr) minmax(0, 1.4fr) minmax(0, 118px);
+  gap: 14px;
+  align-items: stretch;
 }
-.bloco-grid.sem-img {
-  grid-template-columns: minmax(0, 1fr) 320px;
-}
-@media (max-width: 1080px) {
-  .bloco-grid, .bloco-grid.sem-img { grid-template-columns: 1fr; }
+/* Telas estreitas: sÃ³ aÃ­ a linha vira coluna */
+@media (max-width: 900px) {
+  .bloco-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
-.bloco-col { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* CÃ©lula da linha (cada campo) */
+.bloco-cel {
+  min-width: 0; display: flex; flex-direction: column; gap: 8px;
+}
+.bloco-cel > .edit-texto { flex: 1 1 auto; }
+.bloco-cel .bloco-acao { margin-top: auto; }
 
-/* Coluna de texto editável */
+.cel-rotulo {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--texto-3);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.acoes-corpo {
+  display: flex; flex-direction: column; gap: 8px; justify-content: flex-start;
+}
+
+/* Coluna de texto editÃ¡vel */
 .edit-titulo {
   width: 100%; background: var(--bg-alt); border: 1px solid var(--borda);
   color: var(--texto); border-radius: 10px; padding: 9px 12px;
-  font-size: 16px; font-weight: 700; outline: none;
+  font-size: 15px; font-weight: 700; outline: none;
 }
 .edit-titulo:focus { border-color: var(--borda-forte); }
 .edit-texto {
   width: 100%; background: var(--bg-alt); border: 1px solid var(--borda);
   color: var(--texto-2); border-radius: 10px; padding: 10px 12px;
-  font-size: 14px; line-height: 1.6; resize: vertical; min-height: 110px; outline: none;
-  font-family: inherit;
+  font-size: 13px; line-height: 1.55; resize: vertical; min-height: 128px; outline: none;
+  font-family: inherit; box-sizing: border-box;
 }
 .edit-texto:focus { border-color: var(--borda-forte); color: var(--texto); }
-.edit-rodape {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-}
-
-/* Editor do prompt da imagem (por slide) */
-.prompt-editor {
-  display: flex; flex-direction: column; gap: 6px;
-  background: var(--bg-alt); border: 1px dashed var(--borda);
-  border-radius: 10px; padding: 10px 12px;
-}
-.prompt-cab {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  font-size: 12px; font-weight: 700; color: var(--texto-3);
-  text-transform: uppercase; letter-spacing: 0.05em;
-}
 .edit-prompt {
-  min-height: 72px; font-size: 13px; font-family: ui-monospace, Consolas, monospace;
+  min-height: 128px; font-size: 12px; font-family: ui-monospace, Consolas, monospace;
   background: var(--painel); color: var(--texto-2);
 }
-.prompt-ajuda { font-size: 11px; color: var(--texto-3); line-height: 1.45; }
 
 /* Coluna de imagem: miniatura com zoom */
 .thumb-wrap {
@@ -643,12 +644,12 @@ input, textarea, select { font: inherit; }
 .thumb-wrap:hover .thumb-zoom { opacity: 1; }
 .thumb-wrap .sobreposto-desatualizado { border-radius: 0; }
 
-/* Coluna de áudio */
+/* Coluna de Ã¡udio */
 .audio-area {
   background: var(--bg-alt); border: 1px solid var(--borda);
-  border-radius: 10px; padding: 10px 12px;
-  display: flex; flex-direction: column; gap: 8px;
+  border-radius: 10px; padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px;
 }
-.audio-area audio { width: 100%; height: 36px; }
+.audio-area audio { width: 100%; min-width: 0; height: 36px; }
 .audio-badges { display: flex; gap: 6px; flex-wrap: wrap; }
-.bloco-col .bloco-acao { display: flex; gap: 6px; flex-wrap: wrap; }
+.bloco-acao { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
